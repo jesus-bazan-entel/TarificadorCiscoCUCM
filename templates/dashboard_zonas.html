@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Zonas{% endblock %}
+
+{% block header %}Gestión de Zonas{% endblock %}
+
+{% block header_buttons %}
+<button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createZonaModal">
+    <i class="bi bi-plus-circle"></i> Nueva Zona
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Nombre</th>
+                        <th>Descripción</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for zona in zonas %}
+                    <tr>
+                        <td>{{ zona[0] }}</td>
+                        <td>{{ zona[1] }}</td>
+                        <td>{{ zona[2] }}</td>
+                        <td>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-sm btn-outline-primary" 
+                                        onclick="editZona({{ zona[0] }}, '{{ zona[1] }}', '{{ zona[2] }}')">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <a href="/dashboard/prefijos?zona_id={{ zona[0] }}" class="btn btn-sm btn-outline-info">
+                                    <i class="bi bi-grid"></i> Prefijos
+                                </a>
+                                <a href="/dashboard/tarifas?zona_id={{ zona[0] }}" class="btn btn-sm btn-outline-success">
+                                    <i class="bi bi-cash-coin"></i> Tarifas
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-danger" 
+                                        onclick="confirmDeleteZona({{ zona[0] }}, '{{ zona[1] }}')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para crear zona -->
+<div class="modal fade" id="createZonaModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nueva Zona</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createZonaForm">
+                    <div class="mb-3">
+                        <label for="createNombre" class="form-label">Nombre</label>
+                        <input type="text" class="form-control" id="createNombre" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="createDescripcion" class="form-label">Descripción</label>
+                        <textarea class="form-control" id="createDescripcion" rows="3"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="createZona()">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para editar zona -->
+<div class="modal fade" id="editZonaModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Editar Zona</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editZonaForm">
+                    <input type="hidden" id="editZonaId">
+                    <div class="mb-3">
+                        <label for="editNombre" class="form-label">Nombre</label>
+                        <input type="text" class="form-control" id="editNombre" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editDescripcion" class="form-label">Descripción</label>
+                        <textarea class="form-control" id="editDescripcion" rows="3"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="updateZona()">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para confirmar eliminación -->
+<div class="modal fade" id="deleteZonaModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirmar Eliminación</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>¿Está seguro que desea eliminar la zona <strong id="deleteZonaNombre"></strong>?</p>
+                <p class="text-danger">Esta acción no se puede deshacer.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger" onclick="deleteZona()">Eliminar</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    let zonaIdToDelete = null;
+
+    // Función para crear una nueva zona
+    function createZona() {
+        const nombre = document.getElementById('createNombre').value;
+        const descripcion = document.getElementById('createDescripcion').value;
+
+        if (!nombre) {
+            alert('El nombre es obligatorio');
+            return;
+        }
+
+        fetch('/api/zonas', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                nombre: nombre,
+                descripcion: descripcion
+            }),
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Error al crear la zona');
+            }
+            return response.json();
+        })
+        .then(data => {
+            bootstrap.Modal.getInstance(document.getElementById('createZonaModal')).hide();
+            window.location.reload();
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+        });
+    }
+
+    // Función para abrir el modal de edición
+    function editZona(id, nombre, descripcion) {
+        document.getElementById('editZonaId').value = id;
+        document.getElementById('editNombre').value = nombre;
+        document.getElementById('editDescripcion').value = descripcion;
+
+        const modal = new bootstrap.Modal(document.getElementById('editZonaModal'));
+        modal.show();
+    }
+
+    // Función para actualizar una zona
+    function updateZona() {
+        const id = document.getElementById('editZonaId').value;
+        const nombre = document.getElementById('editNombre').value;
+        const descripcion = document.getElementById('editDescripcion').value;
+
+        if (!nombre) {
+            alert('El nombre es obligatorio');
+            return;
+        }
+
+        fetch(`/api/zonas/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                nombre: nombre,
+                descripcion: descripcion
+            }),
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Error al actualizar la zona');
+            }
+            return response.json();
+        })
+        .then(data => {
+            bootstrap.Modal.getInstance(document.getElementById('editZonaModal')).hide();
+            window.location.reload();
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+        });
+    }
+
+    // Función para confirmar eliminación
+    function confirmDeleteZona(id, nombre) {
+        zonaIdToDelete = id;
+        document.getElementById('deleteZonaNombre').textContent = nombre;
+
+        const modal = new bootstrap.Modal(document.getElementById('deleteZonaModal'));
+        modal.show();
+    }
+
+    // Función para eliminar una zona
+    function deleteZona() {
+        if (!zonaIdToDelete) return;
+
+        fetch(`/api/zonas/${zonaIdToDelete}`, {
+            method: 'DELETE',
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw new Error(err.detail || 'Error al eliminar la zona') });
+            }
+            return response.json();
+        })
+        .then(data => {
+            bootstrap.Modal.getInstance(document.getElementById('deleteZonaModal')).hide();
+            window.location.reload();
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+            bootstrap.Modal.getInstance(document.getElementById('deleteZonaModal')).hide();
+        });
+    }
+</script>
+{% endblock %}

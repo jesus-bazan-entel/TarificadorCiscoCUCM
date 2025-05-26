@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Finanzas{% endblock %}
+{% block header %}Finanzas{% endblock %}
+
+{% block header_buttons %}
+<div class="btn-group">
+    <a href="/export/finanzas/pdf" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-file-pdf"></i> Exportar PDF
+    </a>
+    <a href="/export/finanzas/csv" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-file-excel"></i> Exportar CSV
+    </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Financial Chart -->
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="bi bi-graph-up"></i> Costo Diario de Llamadas</h5>
+    </div>
+    <div class="card-body">
+        <canvas id="financeChart" style="max-height: 400px;"></canvas>
+    </div>
+</div>
+
+<!-- Financial Stats -->
+<div class="row">
+    <div class="col-lg-3 col-md-6">
+        <div class="card mb-4">
+            <div class="card-body text-center">
+                <h1 class="display-4 text-primary">${{ "%.2f"|format(data|sum) }}</h1>
+                <p class="lead">Total Periodo</p>
+            </div>
+            <div class="card-footer bg-primary text-white text-center">
+                <i class="bi bi-cash"></i> Últimos 30 días
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6">
+        <div class="card mb-4">
+            <div class="card-body text-center">
+                <h1 class="display-4 text-success">${{ "%.2f"|format(data|sum / data|length if data else 0) }}</h1>
+                <p class="lead">Promedio Diario</p>
+            </div>
+            <div class="card-footer bg-success text-white text-center">
+                <i class="bi bi-calendar"></i> Promedio
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6">
+        <div class="card mb-4">
+            <div class="card-body text-center">
+                <h1 class="display-4 text-danger">${{ "%.2f"|format(data|max if data else 0) }}</h1>
+                <p class="lead">Día Más Costoso</p>
+            </div>
+            <div class="card-footer bg-danger text-white text-center">
+                <i class="bi bi-arrow-up"></i> Máximo
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6">
+        <div class="card mb-4">
+            <div class="card-body text-center">
+                <h1 class="display-4 text-info">${{ "%.2f"|format(data|min if data else 0) }}</h1>
+                <p class="lead">Día Menos Costoso</p>
+            </div>
+            <div class="card-footer bg-info text-white text-center">
+                <i class="bi bi-arrow-down"></i> Mínimo
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Monthly Projection -->
+<div class="card">
+    <div class="card-header bg-warning text-dark">
+        <h5 class="mb-0"><i class="bi bi-lightning"></i> Proyección Mensual</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-lg-6">
+                <div class="progress" style="height: 30px;">
+                    {% set promedio_diario = data|sum / data|length if data else 0 %}
+                    {% set proyeccion_mensual = promedio_diario * 30 %}
+                    {% set porcentaje = (data|sum / proyeccion_mensual) * 100 if proyeccion_mensual > 0 else 0 %}
+                    
+                    <div class="progress-bar bg-success" role="progressbar" style="width: {{ porcentaje }}%;" aria-valuenow="{{ porcentaje }}" aria-valuemin="0" aria-valuemax="100">{{ "%.1f"|format(porcentaje) }}%</div>
+                </div>
+                <div class="d-flex justify-content-between mt-2">
+                    <span>$0</span>
+                    <span>Proyección: ${{ "%.2f"|format(proyeccion_mensual) }}</span>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="alert alert-info">
+                    <h4 class="alert-heading">Análisis</h4>
+                    <p>Basado en el consumo actual, se proyecta un gasto mensual de ${{ "%.2f"|format(proyeccion_mensual) }}. Hasta la fecha, se ha consumido el {{ "%.1f"|format(porcentaje) }}% del presupuesto proyectado.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    // Finance Chart
+    const ctx = document.getElementById('financeChart').getContext('2d');
+    const financeChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ labels|tojson }},
+            datasets: [{
+                label: 'Costo Diario ($)',
+                data: {{ data|tojson }},
+                backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                borderColor: 'rgb(40, 167, 69)',
+                borderWidth: 2,
+                tension: 0.1,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Costo ($)'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Fecha'
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: true
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}

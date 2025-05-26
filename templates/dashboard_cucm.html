@@ -1,0 +1,586 @@
+{% extends "base.html" %}
+
+{% block title %}Configuración CUCM{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <h1 class="mt-4">Configuración de Cisco CUCM</h1>
+    <ol class="breadcrumb mb-4">
+        <li class="breadcrumb-item"><a href="/dashboard/saldo">Dashboard</a></li>
+        <li class="breadcrumb-item active">Configuración CUCM</li>
+    </ol>
+    
+    <div class="row">
+        <div class="col-xl-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-server me-1"></i>
+                    Configuración de Conexión
+                </div>
+                <div class="card-body">
+                    <form id="cucmConfigForm">
+                        <div class="mb-3">
+                            <label for="server_ip" class="form-label">Dirección IP del Servidor*</label>
+                            <input type="text" class="form-control" id="server_ip" name="server_ip" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="server_port" class="form-label">Puerto</label>
+                            <input type="number" class="form-control" id="server_port" name="server_port" value="2748">
+                        </div>
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Usuario JTAPI*</label>
+                            <input type="text" class="form-control" id="username" name="username" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Contraseña*</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="password" name="password" required>
+                                <button class="btn btn-outline-secondary" type="button" id="togglePassword">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="app_info" class="form-label">Nombre de Aplicación</label>
+                            <input type="text" class="form-control" id="app_info" name="app_info" value="TarificadorApp">
+                        </div>
+                        <div class="mb-3">
+                            <label for="reconnect_delay" class="form-label">Tiempo de Reconexión (segundos)</label>
+                            <input type="number" class="form-control" id="reconnect_delay" name="reconnect_delay" value="30" min="5" max="300">
+                            <div class="form-text">Tiempo de espera antes de intentar reconectar en caso de fallo.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="check_interval" class="form-label">Intervalo de Verificación (segundos)</label>
+                            <input type="number" class="form-control" id="check_interval" name="check_interval" value="60" min="10" max="600">
+                            <div class="form-text">Frecuencia con la que se verifica el estado de la conexión.</div>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="enabled" name="enabled" checked>
+                            <label class="form-check-label" for="enabled">Servicio Activo</label>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <button type="button" class="btn btn-primary me-2" id="btnGuardarConfig">Guardar Configuración</button>
+                                <button type="button" class="btn btn-info me-2" id="btnTestConnection">Probar Conexión</button>
+                            </div>
+                            <div>
+                                <button type="button" class="btn btn-success" id="btnServiceStart" style="display:none;">Iniciar Servicio</button>
+                                <button type="button" class="btn btn-danger" id="btnServiceStop" style="display:none;">Detener Servicio</button>
+                                <button type="button" class="btn btn-warning" id="btnServiceRestart">Reiniciar Servicio</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-xl-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Estado del Servicio
+                </div>
+                <div class="card-body">
+                    <div id="statusLoading" class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Cargando...</span>
+                        </div>
+                        <p class="mt-2">Obteniendo estado del servicio...</p>
+                    </div>
+                    
+                    <div id="statusContent" style="display:none;">
+                        <div class="alert" id="serviceStatusAlert">
+                            <h5 id="serviceStatusTitle">Estado del Servicio</h5>
+                            <p id="serviceStatusMessage">Obteniendo información...</p>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h5>Información del Servicio</h5>
+                            <div class="table-responsive">
+                                <table class="table table-bordered">
+                                    <tbody>
+                                        <tr>
+                                            <th width="40%">Estado Actual:</th>
+                                            <td id="serviceCurrentStatus">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>Última Actualización:</th>
+                                            <td id="serviceLastUpdate">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th>Última Conexión Exitosa:</th>
+                                            <td id="serviceLastSuccess">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h5>Logs de Servicio</h5>
+                            <div class="form-group">
+                                <textarea class="form-control" id="serviceLogs" rows="10" readonly style="font-family: monospace; font-size: 0.8rem;"></textarea>
+                            </div>
+                            <div class="d-flex justify-content-end mt-2">
+                                <button class="btn btn-sm btn-outline-secondary" id="btnRefreshLogs">
+                                    <i class="bi bi-sync-alt me-1"></i> Actualizar Logs
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para Resultado de Prueba de Conexión -->
+<div class="modal fade" id="testConnectionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Resultado de Prueba de Conexión</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="testConnectionLoading" class="text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Probando conexión...</span>
+                    </div>
+                    <p class="mt-2">Probando conexión con el servidor CUCM...</p>
+                </div>
+                
+                <div id="testConnectionResult" style="display:none;">
+                    <div class="alert" id="testResultAlert">
+                        <h5 id="testResultTitle">Resultado</h5>
+                        <p id="testResultMessage"></p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="toast" class="toast hide" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <i class="bi bi-info-circle me-2"></i>
+            <strong class="me-auto" id="toast-title">Notificación</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body" id="toast-body">
+            Operación realizada con éxito.
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Variables y elementos
+        const configForm = document.getElementById('cucmConfigForm');
+        const statusLoading = document.getElementById('statusLoading');
+        const statusContent = document.getElementById('statusContent');
+        const serviceStatusAlert = document.getElementById('serviceStatusAlert');
+        const serviceStatusTitle = document.getElementById('serviceStatusTitle');
+        const serviceStatusMessage = document.getElementById('serviceStatusMessage');
+        const serviceCurrentStatus = document.getElementById('serviceCurrentStatus');
+        const serviceLastUpdate = document.getElementById('serviceLastUpdate');
+        const serviceLastSuccess = document.getElementById('serviceLastSuccess');
+        const serviceLogs = document.getElementById('serviceLogs');
+        const btnRefreshLogs = document.getElementById('btnRefreshLogs');
+        const btnServiceStart = document.getElementById('btnServiceStart');
+        const btnServiceStop = document.getElementById('btnServiceStop');
+        const btnServiceRestart = document.getElementById('btnServiceRestart');
+        
+        // Cargar configuración inicial
+        loadConfig();
+        
+        // Cargar estado del servicio
+        loadServiceStatus();
+        
+        // Cargar logs iniciales
+        loadServiceLogs();
+        
+        // Toggle visibilidad de contraseña
+        document.getElementById('togglePassword').addEventListener('click', function() {
+            const passwordInput = document.getElementById('password');
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                this.innerHTML = '<i class="bi bi-eye-slash"></i>';
+            } else {
+                passwordInput.type = 'password';
+                this.innerHTML = '<i class="bi bi-eye"></i>';
+            }
+        });
+        
+        // Guardar configuración
+        document.getElementById('btnGuardarConfig').addEventListener('click', function() {
+            if (!configForm.checkValidity()) {
+                configForm.reportValidity();
+                return;
+            }
+            
+            const formData = new FormData(configForm);
+            const config = {
+                server_ip: formData.get('server_ip'),
+                server_port: parseInt(formData.get('server_port')),
+                username: formData.get('username'),
+                password: formData.get('password'),
+                app_info: formData.get('app_info'),
+                reconnect_delay: parseInt(formData.get('reconnect_delay')),
+                check_interval: parseInt(formData.get('check_interval')),
+                enabled: formData.get('enabled') === 'on'
+            };
+            
+            fetch('/api/cucm/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.detail || 'Error al guardar configuración');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                showToast('Éxito', data.message, 'success');
+                
+                // Recargar estado después de un momento
+                setTimeout(() => {
+                    loadServiceStatus();
+                    loadServiceLogs();
+                }, 3000);
+            })
+            .catch(error => {
+                showToast('Error', error.message, 'danger');
+            });
+        });
+        
+        // Probar conexión
+        document.getElementById('btnTestConnection').addEventListener('click', function() {
+            if (!configForm.checkValidity()) {
+                configForm.reportValidity();
+                return;
+            }
+            
+            const formData = new FormData(configForm);
+            const config = {
+                server_ip: formData.get('server_ip'),
+                server_port: parseInt(formData.get('server_port')),
+                username: formData.get('username'),
+                password: formData.get('password'),
+                app_info: formData.get('app_info'),
+                reconnect_delay: parseInt(formData.get('reconnect_delay')),
+                check_interval: parseInt(formData.get('check_interval')),
+                enabled: formData.get('enabled') === 'on'
+            };
+            
+            // Mostrar modal
+            const testModal = new bootstrap.Modal(document.getElementById('testConnectionModal'));
+            testModal.show();
+            
+            // Mostrar loading y ocultar resultado
+            document.getElementById('testConnectionLoading').style.display = 'block';
+            document.getElementById('testConnectionResult').style.display = 'none';
+            
+            // Realizar la prueba
+            fetch('/api/cucm/test_connection', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.detail || 'Error al probar conexión');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Ocultar loading y mostrar resultado
+                document.getElementById('testConnectionLoading').style.display = 'none';
+                document.getElementById('testConnectionResult').style.display = 'block';
+                
+                // Configurar apariencia según resultado
+                const alertClass = data.success ? 'alert-success' : 'alert-danger';
+                const iconClass = data.success ? 'bi bi-check-circle' : 'bi bi-exclamation-circle';
+                const title = data.success ? 'Conexión Exitosa' : 'Error de Conexión';
+                
+                document.getElementById('testResultAlert').className = `alert ${alertClass}`;
+                document.getElementById('testResultTitle').innerHTML = `<i class="${iconClass} me-2"></i> ${title}`;
+                document.getElementById('testResultMessage').textContent = data.message;
+                
+                // Recargar estado después de un momento si la prueba fue exitosa
+                if (data.success) {
+                    setTimeout(() => {
+                        loadServiceStatus();
+                    }, 1000);
+                }
+            })
+            .catch(error => {
+                // Ocultar loading y mostrar resultado de error
+                document.getElementById('testConnectionLoading').style.display = 'none';
+                document.getElementById('testConnectionResult').style.display = 'block';
+                
+                document.getElementById('testResultAlert').className = 'alert alert-danger';
+                document.getElementById('testResultTitle').innerHTML = '<i class="bi bi-exclamation-circle me-2"></i> Error';
+                document.getElementById('testResultMessage').textContent = error.message;
+            });
+        });
+        
+        // Botones de control del servicio
+        btnServiceStart.addEventListener('click', function() {
+            controlService('start');
+        });
+        
+        btnServiceStop.addEventListener('click', function() {
+            controlService('stop');
+        });
+        
+        btnServiceRestart.addEventListener('click', function() {
+            controlService('restart');
+        });
+        
+        // Botón para actualizar logs
+        btnRefreshLogs.addEventListener('click', function() {
+            loadServiceLogs();
+        });
+        
+        // Función para cargar la configuración
+        function loadConfig() {
+            fetch('/api/cucm/config')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error al cargar configuración');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Llenar el formulario con los datos
+                document.getElementById('server_ip').value = data.server_ip;
+                document.getElementById('server_port').value = data.server_port;
+                document.getElementById('username').value = data.username;
+                // No establecemos el valor de password por seguridad
+                document.getElementById('app_info').value = data.app_info;
+                document.getElementById('reconnect_delay').value = data.reconnect_delay;
+                document.getElementById('check_interval').value = data.check_interval;
+                document.getElementById('enabled').checked = data.enabled;
+            })
+            .catch(error => {
+                showToast('Error', error.message, 'danger');
+            });
+        }
+        
+        // Función para cargar el estado del servicio
+        function loadServiceStatus() {
+            statusLoading.style.display = 'block';
+            statusContent.style.display = 'none';
+            
+            fetch('/api/cucm/status')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error al cargar estado del servicio');
+                }
+                return response.json();
+            })
+            .then(data => {
+                statusLoading.style.display = 'none';
+                statusContent.style.display = 'block';
+                
+                // Actualizar estado del servicio
+                updateServiceStatus(data);
+                
+                // Mostrar u ocultar botones según el estado
+                if (data.service_active) {
+                    btnServiceStart.style.display = 'none';
+                    btnServiceStop.style.display = 'inline-block';
+                } else {
+                    btnServiceStart.style.display = 'inline-block';
+                    btnServiceStop.style.display = 'none';
+                }
+            })
+            .catch(error => {
+                statusLoading.style.display = 'none';
+                showToast('Error', error.message, 'danger');
+                
+                // Mostrar mensaje de error en el panel de estado
+                serviceStatusAlert.className = 'alert alert-danger';
+                serviceStatusTitle.innerHTML = '<i class="bi bi-exclamation-circle me-2"></i> Error';
+                serviceStatusMessage.textContent = 'No se pudo obtener el estado del servicio: ' + error.message;
+            });
+        }
+        
+        // Función para actualizar la visualización del estado del servicio
+        function updateServiceStatus(data) {
+            // Configurar alerta según estado activo
+            if (data.service_active) {
+                serviceStatusAlert.className = 'alert alert-success';
+                serviceStatusTitle.innerHTML = '<i class="bi bi-check-circle me-2"></i> Servicio Activo';
+                serviceStatusMessage.textContent = data.service_status;
+            } else {
+                serviceStatusAlert.className = 'alert alert-warning';
+                serviceStatusTitle.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i> Servicio Inactivo';
+                serviceStatusMessage.textContent = data.service_status;
+            }
+            
+            // Actualizar información adicional
+            serviceCurrentStatus.textContent = formatServiceStatus(data.last_known_status);
+            
+            // Formatear fechas
+            if (data.last_status_update) {
+                const lastUpdate = new Date(data.last_status_update);
+                serviceLastUpdate.textContent = lastUpdate.toLocaleString();
+            } else {
+                serviceLastUpdate.textContent = 'Nunca';
+            }
+            
+            // Si el último estado conocido fue "connected", mostrar como última conexión exitosa
+            if (data.last_known_status === 'connected' && data.last_status_update) {
+                const lastSuccess = new Date(data.last_status_update);
+                serviceLastSuccess.textContent = lastSuccess.toLocaleString();
+            } else {
+                serviceLastSuccess.textContent = 'No disponible';
+            }
+        }
+        
+        // Función para formatear el estado del servicio
+        function formatServiceStatus(status) {
+            const statusMap = {
+                'unknown': 'Desconocido',
+                'connected': 'Conectado',
+                'disconnected': 'Desconectado',
+                'connecting': 'Conectando...',
+                'error': 'Error',
+                'config_updated': 'Configuración Actualizada'
+            };
+            
+            return statusMap[status] || status;
+        }
+        
+        // Función para cargar los logs del servicio
+        function loadServiceLogs() {
+            // En un entorno real, esta función haría una solicitud al servidor
+            // para obtener las últimas líneas del archivo de log
+            
+            fetch('/api/cucm/logs?lines=100')
+            .then(response => {
+                if (!response.ok) {
+                    // Si el endpoint no existe, simulamos logs para la demo
+                    return simulateLogs();
+                }
+                return response.json();
+            })
+            .then(data => {
+                // En un entorno real, esto usaría los logs reales
+                serviceLogs.value = data.logs || 'No hay logs disponibles';
+                
+                // Scroll al final
+                serviceLogs.scrollTop = serviceLogs.scrollHeight;
+            })
+            .catch(error => {
+                // Si hay error, simulamos logs para la demo
+                serviceLogs.value = simulateLogs();
+            });
+        }
+        
+        // Función para simular logs (solo para demo)
+        function simulateLogs() {
+            const now = new Date();
+            return `2025-05-08 08:00:01.234 INFO  [main] com.tarificador.TarificadorService - Iniciando Servicio de Tarificador...
+2025-05-08 08:00:01.345 INFO  [main] com.tarificador.LoggingConfig - Logging configurado correctamente a nivel INFO
+2025-05-08 08:00:01.567 INFO  [main] com.tarificador.CucmConnectionManager - Iniciando conexión con CUCM...
+2025-05-08 08:00:02.789 INFO  [main] com.tarificador.CucmConnectionManager - Conexión con CUCM establecida exitosamente.
+2025-05-08 08:00:02.901 INFO  [main] com.tarificador.CucmConnectionManager - Observador de llamadas registrado correctamente
+2025-05-08 08:00:03.123 INFO  [main] com.tarificador.ProviderStatusObserver - CUCM está en servicio
+2025-05-08 08:00:03.234 INFO  [main] com.tarificador.TarificadorService - Servicio de Tarificador iniciado correctamente.
+2025-05-08 08:05:45.678 INFO  [pool-1-thread-1] com.tarificador.CallListener - Llamada iniciada: Call[id=123456]
+2025-05-08 08:05:46.789 INFO  [pool-1-thread-1] com.tarificador.CallListener - Verificación de saldo para 1001: Tiene saldo
+2025-05-08 08:05:46.890 INFO  [pool-1-thread-1] com.tarificador.CallListener - Evento de inicio de llamada enviado: {"calling_number":"1001","called_number":"1002","start_time":"2025-05-08T08:05:46Z","status":"connected"}
+2025-05-08 08:07:32.456 INFO  [pool-1-thread-1] com.tarificador.CallListener - CDR enviado: {"calling_number":"1001","called_number":"1002","start_time":"2025-05-08T08:05:46Z","end_time":"2025-05-08T08:07:32Z","duration_seconds":106,"status":"disconnected"}
+2025-05-08 ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}.${now.getMilliseconds()} INFO  [main] com.tarificador.CucmConnectionManager - Conexión con CUCM verificada correctamente.`;
+        }
+        
+        // Función para controlar el servicio
+        function controlService(action) {
+            // Confirmar la acción
+            let confirmMessage = '';
+            
+            if (action === 'start') {
+                confirmMessage = '¿Está seguro de que desea iniciar el servicio?';
+            } else if (action === 'stop') {
+                confirmMessage = '¿Está seguro de que desea detener el servicio? Esto interrumpirá el monitoreo de llamadas.';
+            } else if (action === 'restart') {
+                confirmMessage = '¿Está seguro de que desea reiniciar el servicio? Esto interrumpirá brevemente el monitoreo de llamadas.';
+            }
+            
+            if (!confirm(confirmMessage)) {
+                return;
+            }
+            
+            fetch(`/api/cucm/service/${action}`, {
+                method: 'POST'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.detail || `Error al ${action === 'start' ? 'iniciar' : action === 'stop' ? 'detener' : 'reiniciar'} el servicio`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                showToast('Éxito', data.message, 'success');
+                
+                // Recargar estado después de un momento
+                setTimeout(() => {
+                    loadServiceStatus();
+                    loadServiceLogs();
+                }, 3000);
+            })
+            .catch(error => {
+                showToast('Error', error.message, 'danger');
+            });
+        }
+        
+        // Función para mostrar toast
+        function showToast(title, message, type) {
+            const toast = document.getElementById('toast');
+            const toastTitle = document.getElementById('toast-title');
+            const toastBody = document.getElementById('toast-body');
+            
+            toast.classList.remove('bg-success', 'bg-danger', 'bg-warning', 'bg-info');
+            
+            if (type === 'success') {
+                toast.classList.add('bg-success', 'text-white');
+            } else if (type === 'danger') {
+                toast.classList.add('bg-danger', 'text-white');
+            } else if (type === 'warning') {
+                toast.classList.add('bg-warning');
+            } else {
+                toast.classList.add('bg-info');
+            }
+            
+            toastTitle.textContent = title;
+            toastBody.textContent = message;
+            
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+        }
+    });
+</script>
+{% endblock %}

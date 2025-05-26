@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}Ranking de Consumo{% endblock %}
+{% block header %}Ranking de Consumo{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Consumption Chart -->
+    <div class="col-lg-7">
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Top 10 Anexos por Consumo</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="rankingChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Top Consumer Details -->
+    <div class="col-lg-5">
+        <div class="card mb-4">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0"><i class="bi bi-trophy"></i> Mayor Consumidor</h5>
+            </div>
+            <div class="card-body text-center">
+                {% if rows|length > 0 %}
+                <h1 class="display-4">{{ rows[0][0] }}</h1>
+                <p class="lead">Anexo con mayor consumo</p>
+                <div class="mt-3">
+                    <h2 class="text-warning">${{ "%.2f"|format(rows[0][1]) }}</h2>
+                    <p>Total consumido</p>
+                </div>
+                <div class="alert alert-info mt-3">
+                    {% set total = rows|map(attribute=1)|sum %}
+                    {% if total > 0 %}
+                        <p>Este anexo representa el {{ "%.1f"|format((rows[0][1] / total) * 100) }}% del consumo total.</p>
+                    {% else %}
+                        <p>Este anexo representa el 0.0% del consumo total.</p>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div class="alert alert-info">
+                    <p>No hay datos de consumo disponibles.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Consumption Ranking Table -->
+<div class="card">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="bi bi-table"></i> Detalle de Ranking</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Anexo</th>
+                        <th>Consumo Total</th>
+                        <th>Porcentaje</th>
+                        <th>Gráfico</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set total_consumo = rows|map(attribute=1)|sum %}
+                    {% for row in rows %}
+                    {% set porcentaje = (row[1] / total_consumo) * 100 if total_consumo > 0 else 0 %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ row[0] }}</td>
+                        <td>${{ "%.2f"|format(row[1]) }}</td>
+                        <td>{{ "%.1f"|format(porcentaje) }}%</td>
+                        <td>
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar {% if loop.index == 1 %}bg-warning{% else %}bg-primary{% endif %}" 
+                                     role="progressbar" 
+                                     style="width: {{ porcentaje }}%;" 
+                                     aria-valuenow="{{ porcentaje }}" 
+                                     aria-valuemin="0" 
+                                     aria-valuemax="100">
+                                    {{ "%.1f"|format(porcentaje) }}%
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    // Ranking Chart
+    const ctx = document.getElementById('rankingChart').getContext('2d');
+    const rankingChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: {{ labels|tojson }},
+            datasets: [{
+                label: 'Consumo Total ($)',
+                data: {{ data|tojson }},
+                backgroundColor: [
+                    'rgba(255, 193, 7, 0.8)', // First bar (highest consumer) in yellow/warning color
+                    ...Array({{ labels|length }} - 1).fill('rgba(13, 110, 253, 0.8)') // Rest in blue/primary
+                ],
+                borderColor: [
+                    'rgb(255, 193, 7)',
+                    ...Array({{ labels|length }} - 1).fill('rgb(13, 110, 253)')
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            indexAxis: 'y', // Horizontal bar chart
+            responsive: true,
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Consumo ($)'
+                    }
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+
+{% block title %}Monitoreo de Llamadas{% endblock %}
+
+{% block header %}Monitoreo de Llamadas en Tiempo Real{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card" id="active-calls-panel">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Llamadas Activas</h5>
+                <span class="badge bg-light text-dark" id="call-count">0</span>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>Origen</th>
+                                <th>Destino</th>
+                                <th>Hora Inicio</th>
+                                <th>Duración</th>
+                                <th>Costo Estimado</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="active-calls">
+                            <!-- Las llamadas activas se mostrarán aquí -->
+                            <tr>
+                                <td colspan="6" class="text-center">No hay llamadas activas en este momento</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">Estadísticas de Hoy</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-6">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h3 id="total-calls-today">{{ llamadas_hoy }}</h3>
+                                <p class="mb-0">Llamadas</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h3 id="total-minutes-today">{{ minutos_hoy }}</h3>
+                                <p class="mb-0">Minutos</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">Alertas de Saldo</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-group" id="balance-alerts">
+                    {% if alertas_saldo %}
+                        {% for alerta in alertas_saldo %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Anexo: {{ alerta[0] }}
+                            <span class="badge bg-danger rounded-pill">${{ alerta[1] }}</span>
+                        </li>
+                        {% endfor %}
+                    {% else %}
+                        <li class="list-group-item text-center">No hay alertas de saldo</li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0">Historial de Llamadas Recientes</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>Origen</th>
+                                <th>Destino</th>
+                                <th>Hora Inicio</th>
+                                <th>Duración</th>
+                                <th>Costo</th>
+                                <th>Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if llamadas_recientes %}
+                                {% for llamada in llamadas_recientes %}
+                                <tr>
+                                    <td>{{ llamada.calling_number }}</td>
+                                    <td>{{ llamada.called_number }}</td>
+                                    <td>{{ llamada.start_time.strftime('%H:%M:%S') }}</td>
+                                    <td>{{ llamada.duration_seconds // 60 }}:{{ llamada.duration_seconds % 60 }}</td>
+                                    <td>${{ "%.2f"|format(llamada.cost) }}</td>
+                                    <td>
+                                        {% if llamada.status == 'disconnected' %}
+                                        <span class="badge bg-success">Completada</span>
+                                        {% elif llamada.status == 'rejected_insufficient_balance' %}
+                                        <span class="badge bg-danger">Rechazada (Saldo)</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary">{{ llamada.status }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="6" class="text-center">No hay llamadas recientes</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<div class="row mt-3">
+    <div class="col-12">
+        <button id="debug-btn" class="btn btn-secondary">Forzar actualización</button>
+    </div>
+</div>
+
+<script>
+    // Variables globales
+    let updateInterval;
+    
+    // Función para actualizar la tabla de llamadas activas mediante AJAX
+    function updateActiveCalls() {
+        console.log('Actualizando llamadas activas vía AJAX');
+        
+        // CAMBIO: Usar el endpoint correcto /api/active-calls en lugar de /api/active-calls-list
+        fetch('/api/active-calls')
+            .then(response => response.json())
+            .then(data => {
+                console.log('Datos recibidos:', data);
+                updateTable(data);
+            })
+            .catch(error => {
+                console.error('Error al obtener datos:', error);
+            });
+    }
+    
+    // Función completa para actualizar la tabla
+    function updateTable(data) {
+        const tableBody = document.getElementById('active-calls');
+        const callCountElement = document.getElementById('call-count');
+        
+        if (!tableBody) {
+            console.error("No se encontró el elemento con ID 'active-calls'");
+            return;
+        }
+        
+        // Actualizar contador
+        callCountElement.textContent = data.length;
+        
+        // Limpiar tabla
+        tableBody.innerHTML = '';
+        
+        if (data && data.length > 0) {
+            // Agregar cada llamada a la tabla
+            data.forEach(call => {
+                // Crear nueva fila
+                const row = document.createElement('tr');
+                
+                // Formatear la hora de inicio
+                let startTime = 'N/A';
+                try {
+                    if (call.start_time) {
+                        const date = new Date(call.start_time);
+                        startTime = date.toLocaleTimeString();
+                    }
+                } catch (e) {
+                    console.error('Error formateando fecha:', e);
+                }
+                
+                // Formatear duración (de segundos a minutos:segundos)
+                const duration = parseInt(call.current_duration) || 0;
+                const minutes = Math.floor(duration / 60);
+                const seconds = duration % 60;
+                const durationFormatted = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                
+                // Formatear costo
+                const cost = parseFloat(call.current_cost) || 0;
+                const costFormatted = `$${cost.toFixed(2)}`;
+                
+                // Crear HTML de la fila
+                row.innerHTML = `
+                    <td>${call.calling_number || 'N/A'}</td>
+                    <td>${call.called_number || 'N/A'}</td>
+                    <td>${startTime}</td>
+                    <td>${durationFormatted}</td>
+                    <td>${costFormatted}</td>
+                    <td>
+                        <button class="btn btn-sm btn-danger" onclick="terminateCall('${call.call_id}')">
+                            Terminar
+                        </button>
+                    </td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+        } else {
+            // Mostrar mensaje si no hay llamadas activas
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center">No hay llamadas activas en este momento</td>
+                </tr>
+            `;
+        }
+    }
+    
+    // Función para terminar una llamada
+    function terminateCall(callId) {
+        if (confirm('¿Está seguro que desea terminar esta llamada?')) {
+            console.log(`Solicitando terminar llamada: ${callId}`);
+            
+            fetch(`/api/terminate-call/${callId}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Respuesta:', data);
+                if (data.status === 'ok') {
+                    // Actualizar la tabla inmediatamente
+                    updateActiveCalls();
+                } else {
+                    alert('Error al terminar la llamada: ' + (data.message || 'Error desconocido'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al comunicarse con el servidor');
+            });
+        }
+    }
+    
+    // Botón de depuración
+    document.getElementById('debug-btn').addEventListener('click', function() {
+        console.log('Forzando actualización...');
+        updateActiveCalls();
+    });
+    
+    // Iniciar actualización periódica al cargar la página
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('Inicializando monitoreo en tiempo real mediante AJAX...');
+        
+        // Primera actualización inmediata
+        updateActiveCalls();
+        
+        // Configurar actualización periódica cada 3 segundos
+        updateInterval = setInterval(updateActiveCalls, 3000);
+        
+        // Limpieza al cerrar/recargar la página
+        window.addEventListener('beforeunload', function() {
+            clearInterval(updateInterval);
+        });
+    });
+</script>
+
+{% endblock %}

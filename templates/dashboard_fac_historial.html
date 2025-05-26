@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+    <h1 class="h3 mb-4 text-gray-800">Historial de Sincronización FAC con CUCM</h1>
+    
+    <!-- Alertas -->
+    <div id="alertContainer"></div>
+    
+    <!-- Acciones -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+            <h6 class="m-0 font-weight-bold text-primary">Acciones</h6>
+            <div>
+                <a href="/dashboard/fac" class="btn btn-secondary">
+                    <i class="bi bi-arrow-left"></i> Volver a Códigos FAC
+                </a>
+                <button id="syncWithCucm" class="btn btn-warning">
+                    <i class="bi bi-sync"></i> Sincronizar Ahora
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tabla de Historial -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Registro de Sincronizaciones</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="historialTable" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>Fecha y Hora</th>
+                            <th>Código</th>
+                            <th>Acción</th>
+                            <th>Usuario</th>
+                            <th>Estado</th>
+                            <th>Detalles</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in audit_logs %}
+                        <tr>
+                            <td>{{ log.timestamp.strftime('%d/%m/%Y %H:%M:%S') }}</td>
+                            <td>{{ log.authorization_code }}</td>
+                            <td>
+                                {% if log.action == 'sync_create' %}
+                                <span class="badge badge-success">Creación en CUCM</span>
+                                {% elif log.action == 'sync_update' %}
+                                <span class="badge badge-info">Actualización en CUCM</span>
+                                {% elif log.action == 'sync_detect' %}
+                                <span class="badge badge-warning">Detectado en CUCM</span>
+                                {% elif log.action == 'sync' %}
+                                <span class="badge badge-primary">Sincronización</span>
+                                {% else %}
+                                <span class="badge badge-secondary">{{ log.action }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ log.admin_user }}</td>
+                            <td>
+                                {% if log.success %}
+                                <span class="badge badge-success">Exitoso</span>
+                                {% else %}
+                                <span class="badge badge-danger">Error</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ log.details or '' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    // Función para mostrar alertas
+    function showAlert(type, message) {
+        const alertHTML = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                ${message}
+                <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+        `;
+        $('#alertContainer').html(alertHTML);
+        
+        // Auto-ocultar después de 5 segundos
+        setTimeout(() => {
+            $('.alert').alert('close');
+        }, 5000);
+    }
+    
+    // Verificar si DataTables está disponible
+    if ($.fn.DataTable) {
+        try {
+            $('#historialTable').DataTable({
+                "language": {
+                    // Usa la versión local del archivo de idioma para evitar problemas CORS
+                    "url": "/static/js/Spanish.json"
+                },
+                "order": [[0, "desc"]] // Ordenar por fecha descendente
+            });
+        } catch(e) {
+            console.error("Error al inicializar DataTable:", e);
+            // Fallback básico si DataTables no está disponible
+            $('#historialTable').addClass('table-striped');
+        }
+    } else {
+        console.warn("DataTable no está disponible");
+        $('#historialTable').addClass('table-striped');
+    }
+    
+    // Sincronizar con CUCM
+    $('#syncWithCucm').click(function() {
+        if (confirm('¿Desea sincronizar todos los códigos FAC con CUCM? Esta operación puede tomar tiempo.')) {
+            // Mostrar indicador de carga
+            $(this).html('<i class="bi bi-arrow-repeat"></i> Sincronizando...');
+            $(this).prop('disabled', true);
+            
+            $.ajax({
+                url: '/api/fac/sync-with-cucm',
+                type: 'POST',
+                success: function(response) {
+                    showAlert('success', 'Sincronización iniciada correctamente.');
+                    // Recargar página después de 3 segundos
+                    setTimeout(() => {
+                        location.reload();
+                    }, 3000);
+                },
+                error: function(xhr) {
+                    const error = xhr.responseJSON?.detail || 'Error al iniciar sincronización';
+                    showAlert('danger', error);
+                    // Restaurar botón
+                    $('#syncWithCucm').html('<i class="bi bi-sync"></i> Sincronizar Ahora');
+                    $('#syncWithCucm').prop('disabled', false);
+                }
+            });
+        }
+    });
+});
+</script>
+{% endblock %}

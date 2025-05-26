@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}Configuración CUCM{% endblock %}
+{% block header %}Configuración Cisco CUCM{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        {% if success == "1" %}
+        <div class="alert alert-success" role="alert">
+            <h4 class="alert-heading"><i class="bi bi-check-circle"></i> Configuración Guardada</h4>
+            <p>La configuración CUCM ha sido actualizada correctamente.</p>
+        </div>
+        {% endif %}
+        
+        {% if restart == "1" %}
+        <div class="alert alert-success" role="alert">
+            <h4 class="alert-heading"><i class="bi bi-check-circle"></i> Servicio Reiniciado</h4>
+            <p>El servicio JTAPI ha sido reiniciado correctamente.</p>
+        </div>
+        {% endif %}
+        
+        {% if error %}
+        <div class="alert alert-danger" role="alert">
+            <h4 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> Error</h4>
+            <p>{{ error }}</p>
+        </div>
+        {% endif %}
+        
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-telephone-plus"></i> Configuración de Conexión CUCM</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" action="/dashboard/cucm_config">
+                    <div class="mb-3">
+                        <label for="cucm_ip" class="form-label">Dirección IP del CUCM</label>
+                        <input type="text" class="form-control" id="cucm_ip" name="cucm_ip" value="{{ config.cucm_ip if config else '190.105.250.127' }}" required>
+                        <div class="form-text">Ej: 190.105.250.127</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="cucm_port" class="form-label">Puerto JTAPI</label>
+                        <input type="number" class="form-control" id="cucm_port" name="cucm_port" value="{{ config.cucm_port if config else '2748' }}" required>
+                        <div class="form-text">Por defecto: 2748</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="jtapi_user" class="form-label">Usuario JTAPI</label>
+                        <input type="text" class="form-control" id="jtapi_user" name="jtapi_user" value="{{ config.jtapi_user if config else 'jtapiuser' }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="jtapi_password" class="form-label">Contraseña JTAPI</label>
+                        <input type="password" class="form-control" id="jtapi_password" name="jtapi_password" value="{{ config.jtapi_password if config else '' }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="app_info" class="form-label">Nombre de Aplicación</label>
+                        <input type="text" class="form-control" id="app_info" name="app_info" value="{{ config.app_info if config else 'Tarificador' }}" required>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="secure_conn" name="secure_conn" {% if config and config.secure_conn %}checked{% endif %}>
+                        <label class="form-check-label" for="secure_conn">Conexión Segura (CSTA)</label>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> Guardar Configuración
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-play-circle"></i> Estado del Servicio</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-body text-center">
+                                <h5>Servicio Web</h5>
+                                <div class="mt-3">
+                                    <span class="badge bg-success fs-5">Activo</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-body text-center">
+                                <h5>Servicio JTAPI</h5>
+                                <div class="mt-3">
+                                    <span class="badge {% if jtapi_status %}bg-success{% else %}bg-danger{% endif %} fs-5">
+                                        {% if jtapi_status %}Activo{% else %}Inactivo{% endif %}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="d-grid gap-2 mt-4">
+                    <a href="/dashboard/restart_jtapi" class="btn btn-warning">
+                        <i class="bi bi-arrow-repeat"></i> Reiniciar Servicio JTAPI
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Información de Conexión</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <h5>Cadena de Conexión JTAPI:</h5>
+                    <code id="connection-string">{{ connection_string }}</code>
+                    <button class="btn btn-sm btn-primary mt-2" onclick="copyToClipboard('connection-string')">
+                        <i class="bi bi-clipboard"></i> Copiar
+                    </button>
+                </div>
+                <div class="alert alert-secondary">
+                    <h5>Registros de Conexión:</h5>
+                    <pre class="border p-3 bg-light" style="max-height: 200px; overflow-y: auto;">{{ logs }}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    function copyToClipboard(elementId) {
+        const el = document.getElementById(elementId);
+        const text = el.textContent;
+        
+        navigator.clipboard.writeText(text).then(function() {
+            alert('Copiado al portapapeles');
+        }, function(err) {
+            console.error('Error al copiar: ', err);
+        });
+    }
+</script>
+{% endblock %}

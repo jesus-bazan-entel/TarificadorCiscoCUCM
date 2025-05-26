@@ -1,0 +1,690 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Anexos{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <h1 class="mt-4">Gestión de Anexos</h1>
+    <ol class="breadcrumb mb-4">
+        <li class="breadcrumb-item"><a href="/dashboard/saldo">Dashboard</a></li>
+        <li class="breadcrumb-item active">Anexos</li>
+    </ol>
+    
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+                <i class="fas fa-phone me-1"></i>
+                Listado de Anexos
+            </div>
+            <div>
+                <a href="#" class="btn btn-primary btn-sm me-2" data-bs-toggle="modal" data-bs-target="#modalNuevoAnexo">
+                    <i class="fas fa-plus me-1"></i> Nuevo Anexo
+                </a>
+                <a href="/dashboard/anexos/carga_masiva" class="btn btn-success btn-sm me-2">
+                    <i class="fas fa-file-import me-1"></i> Carga Masiva
+                </a>
+                <a href="#" class="btn btn-warning btn-sm" id="btnGenerarPines">
+                    <i class="fas fa-key me-1"></i> Generar PINes
+                </a>
+                <button type="button" class="btn btn-info btn-sm ms-2" data-bs-toggle="modal" data-bs-target="#modalConfiguracionPin">
+                    <i class="fas fa-cog me-1"></i> Configurar PIN
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <form action="/dashboard/anexos" method="get">
+                        <div class="input-group">
+                            <input type="text" class="form-control" placeholder="Buscar anexo o área..." name="buscar" value="{{ buscar }}">
+                            <button class="btn btn-outline-secondary" type="submit">
+                                <i class="fas fa-search"></i>
+                            </button>
+                            {% if buscar %}
+                            <a href="/dashboard/anexos" class="btn btn-outline-danger">
+                                <i class="fas fa-times"></i>
+                            </a>
+                            {% endif %}
+                        </div>
+                    </form>
+                </div>
+                <div class="col-md-6 text-end">
+                    <span class="text-muted">Total: {{ total_records }} anexos</span>
+                </div>
+            </div>
+            
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover table-striped">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Número</th>
+                            <th>Usuario</th>
+                            <th>Área Nivel 1</th>
+                            <th>Área Nivel 2</th>
+                            <th>Área Nivel 3</th>
+                            <th>Saldo Actual</th>
+                            <th>Saldo Disponible</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                        <tr>
+                            <td>{{ row.numero }}</td>
+                            <td>{{ row.usuario }}</td>
+                            <td>{{ row.area_nivel1 }}</td>
+                            <td>{{ row.area_nivel2 or "" }}</td>
+                            <td>{{ row.area_nivel3 or "" }}</td>
+                            <td class="text-end">${{ "%.2f"|format(row.saldo_actual) }}</td>
+                            <td class="text-end">${{ "%.2f"|format(row.saldo or 0) }}</td>
+                            <td>
+                                {% if row.activo %}
+                                <span class="badge bg-success">Activo</span>
+                                {% else %}
+                                <span class="badge bg-danger">Inactivo</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <button type="button" class="btn btn-info btn-sm me-1 btn-editar" 
+                                        data-id="{{ row.id }}">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                {% if row.activo %}
+                                <button type="button" class="btn btn-danger btn-sm btn-eliminar" 
+                                        data-id="{{ row.id }}" data-numero="{{ row.numero }}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                                {% else %}
+                                <button type="button" class="btn btn-success btn-sm btn-activar" 
+                                        data-id="{{ row.id }}" data-numero="{{ row.numero }}">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="9" class="text-center">No hay anexos registrados</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Paginación -->
+            {% if total_pages > 1 %}
+            <nav aria-label="Paginación de anexos">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                        <a class="page-link" href="?page=1{% if buscar %}&buscar={{ buscar }}{% endif %}" aria-label="Primera">
+                            <span aria-hidden="true">&laquo;&laquo;</span>
+                        </a>
+                    </li>
+                    <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                        <a class="page-link" href="?page={{ page - 1 }}{% if buscar %}&buscar={{ buscar }}{% endif %}" aria-label="Anterior">
+                            <span aria-hidden="true">&laquo;</span>
+                        </a>
+                    </li>
+                    
+                    {% set start_page = [page - 2, 1]|max %}
+                    {% set end_page = [start_page + 4, total_pages]|min %}
+                    {% set start_page = [end_page - 4, 1]|max %}
+                    
+                    {% for p in range(start_page, end_page + 1) %}
+                    <li class="page-item {% if p == page %}active{% endif %}">
+                        <a class="page-link" href="?page={{ p }}{% if buscar %}&buscar={{ buscar }}{% endif %}">{{ p }}</a>
+                    </li>
+                    {% endfor %}
+                    
+                    <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+                        <a class="page-link" href="?page={{ page + 1 }}{% if buscar %}&buscar={{ buscar }}{% endif %}" aria-label="Siguiente">
+                            <span aria-hidden="true">&raquo;</span>
+                        </a>
+                    </li>
+                    <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+                        <a class="page-link" href="?page={{ total_pages }}{% if buscar %}&buscar={{ buscar }}{% endif %}" aria-label="Última">
+                            <span aria-hidden="true">&raquo;&raquo;</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nuevo Anexo -->
+<div class="modal fade" id="modalNuevoAnexo" tabindex="-1" aria-labelledby="modalNuevoAnexoLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalNuevoAnexoLabel">Nuevo Anexo</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formNuevoAnexo">
+                    <div class="mb-3">
+                        <label for="numero" class="form-label">Número de Anexo*</label>
+                        <input type="text" class="form-control" id="numero" name="numero" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="usuario" class="form-label">Usuario*</label>
+                        <input type="text" class="form-control" id="usuario" name="usuario" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="area_nivel1" class="form-label">Área Nivel 1*</label>
+                        <input type="text" class="form-control" id="area_nivel1" name="area_nivel1" required list="areas_nivel1">
+                        <datalist id="areas_nivel1">
+                            {% for area in areas_nivel1 %}
+                            <option value="{{ area }}">
+                            {% endfor %}
+                        </datalist>
+                    </div>
+                    <div class="mb-3">
+                        <label for="area_nivel2" class="form-label">Área Nivel 2</label>
+                        <input type="text" class="form-control" id="area_nivel2" name="area_nivel2" list="areas_nivel2">
+                        <datalist id="areas_nivel2">
+                            {% for area in areas_nivel2 %}
+                            <option value="{{ area }}">
+                            {% endfor %}
+                        </datalist>
+                    </div>
+                    <div class="mb-3">
+                        <label for="area_nivel3" class="form-label">Área Nivel 3</label>
+                        <input type="text" class="form-control" id="area_nivel3" name="area_nivel3" list="areas_nivel3">
+                        <datalist id="areas_nivel3">
+                            {% for area in areas_nivel3 %}
+                            <option value="{{ area }}">
+                            {% endfor %}
+                        </datalist>
+                    </div>
+                    <div class="mb-3">
+                        <label for="pin" class="form-label">PIN ({{ pin_length }} dígitos, dejar en blanco para generar automáticamente)</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="pin" name="pin" minlength="{{ pin_length }}" maxlength="{{ pin_length }}">
+                            <button class="btn btn-outline-secondary" type="button" id="togglePin">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="saldo_actual" class="form-label">Saldo Inicial</label>
+                        <div class="input-group">
+                            <span class="input-group-text">$</span>
+                            <input type="number" class="form-control" id="saldo_actual" name="saldo_actual" step="0.01" min="0" value="0">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnGuardarAnexo">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Editar Anexo -->
+<div class="modal fade" id="modalEditarAnexo" tabindex="-1" aria-labelledby="modalEditarAnexoLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalEditarAnexoLabel">Editar Anexo</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formEditarAnexo">
+                    <input type="hidden" id="edit_id" name="id">
+                    <div class="mb-3">
+                        <label for="edit_numero" class="form-label">Número de Anexo*</label>
+                        <input type="text" class="form-control" id="edit_numero" name="numero" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_usuario" class="form-label">Usuario*</label>
+                        <input type="text" class="form-control" id="edit_usuario" name="usuario" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_area_nivel1" class="form-label">Área Nivel 1*</label>
+                        <input type="text" class="form-control" id="edit_area_nivel1" name="area_nivel1" required list="areas_nivel1">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_area_nivel2" class="form-label">Área Nivel 2</label>
+                        <input type="text" class="form-control" id="edit_area_nivel2" name="area_nivel2" list="areas_nivel2">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_area_nivel3" class="form-label">Área Nivel 3</label>
+                        <input type="text" class="form-control" id="edit_area_nivel3" name="area_nivel3" list="areas_nivel3">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_pin" class="form-label">Nuevo PIN ({{ pin_length }} dígitos, dejar en blanco para mantener el actual)</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="edit_pin" name="pin" minlength="{{ pin_length }}" maxlength="{{ pin_length }}">
+                            <button class="btn btn-outline-secondary" type="button" id="toggleEditPin">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_saldo_actual" class="form-label">Saldo Actual</label>
+                        <div class="input-group">
+                            <span class="input-group-text">$</span>
+                            <input type="number" class="form-control" id="edit_saldo_actual" name="saldo_actual" step="0.01" min="0" value="0">
+                        </div>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="edit_activo" name="activo" checked>
+                        <label class="form-check-label" for="edit_activo">Activo</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnActualizarAnexo">Actualizar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Configuración PIN -->
+<div class="modal fade" id="modalConfiguracionPin" tabindex="-1" aria-labelledby="modalConfiguracionPinLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalConfiguracionPinLabel">Configuración de PIN</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formConfiguracionPin">
+                    <div class="mb-3">
+                        <label for="pin_length" class="form-label">Longitud de PIN</label>
+                        <input type="number" class="form-control" id="pin_length" name="pin_length" min="4" max="10" value="{{ pin_length }}">
+                        <div class="form-text">La longitud debe estar entre 4 y 10 dígitos</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnGuardarConfiguracionPin">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Confirmación Eliminar -->
+<div class="modal fade" id="modalConfirmarEliminar" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirmar Eliminación</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>¿Está seguro de que desea desactivar el anexo <span id="anexo_a_eliminar"></span>?</p>
+                <p class="text-danger">Esta acción puede afectar la operación del sistema.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger" id="btnConfirmarEliminar">Desactivar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Mostrar PIN -->
+<div class="modal fade" id="modalMostrarPin" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">PIN Generado</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-success">
+                    <p>El anexo ha sido creado exitosamente.</p>
+                    <p>Número de anexo: <strong id="nuevo_anexo"></strong></p>
+                    <p>PIN: <strong id="nuevo_pin"></strong></p>
+                </div>
+                <p class="text-warning">Guarde este PIN, no podrá verlo nuevamente.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="toast" class="toast hide" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong class="me-auto" id="toast-title">Notificación</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body" id="toast-body">
+            Operación realizada con éxito.
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Toggle PIN visibility
+        document.getElementById('togglePin').addEventListener('click', function() {
+            const pinInput = document.getElementById('pin');
+            if (pinInput.type === 'password') {
+                pinInput.type = 'text';
+                this.innerHTML = '<i class="fas fa-eye-slash"></i>';
+            } else {
+                pinInput.type = 'password';
+                this.innerHTML = '<i class="fas fa-eye"></i>';
+            }
+        });
+        
+        document.getElementById('toggleEditPin').addEventListener('click', function() {
+            const pinInput = document.getElementById('edit_pin');
+            if (pinInput.type === 'password') {
+                pinInput.type = 'text';
+                this.innerHTML = '<i class="fas fa-eye-slash"></i>';
+            } else {
+                pinInput.type = 'password';
+                this.innerHTML = '<i class="fas fa-eye"></i>';
+            }
+        });
+        
+        // Guardar nuevo anexo
+        document.getElementById('btnGuardarAnexo').addEventListener('click', function() {
+            const form = document.getElementById('formNuevoAnexo');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+            
+            const formData = new FormData(form);
+            const anexoData = {
+                numero: formData.get('numero'),
+                usuario: formData.get('usuario'),
+                area_nivel1: formData.get('area_nivel1'),
+                area_nivel2: formData.get('area_nivel2') || null,
+                area_nivel3: formData.get('area_nivel3') || null,
+                pin: formData.get('pin') || null,
+                saldo_actual: parseFloat(formData.get('saldo_actual')) || 0,
+                activo: true
+            };
+            
+            fetch('/anexo', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(anexoData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.detail || 'Error al crear anexo');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Mostrar PIN generado
+                document.getElementById('nuevo_anexo').textContent = anexoData.numero;
+                document.getElementById('nuevo_pin').textContent = data.pin;
+                
+                const modalNuevoAnexo = bootstrap.Modal.getInstance(document.getElementById('modalNuevoAnexo'));
+                modalNuevoAnexo.hide();
+                
+                const modalMostrarPin = new bootstrap.Modal(document.getElementById('modalMostrarPin'));
+                modalMostrarPin.show();
+                
+                // Limpiar formulario
+                form.reset();
+                
+                // Recargar página después de cerrar el modal
+                document.getElementById('modalMostrarPin').addEventListener('hidden.bs.modal', function() {
+                    window.location.reload();
+                });
+            })
+            .catch(error => {
+                showToast('Error', error.message, 'danger');
+            });
+        });
+        
+        // Cargar datos de anexo para editar
+        document.querySelectorAll('.btn-editar').forEach(button => {
+            button.addEventListener('click', function() {
+                const anexoId = this.getAttribute('data-id');
+                
+                fetch(`/anexo/${anexoId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Error al cargar datos del anexo');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    document.getElementById('edit_id').value = data.id;
+                    document.getElementById('edit_numero').value = data.numero;
+                    document.getElementById('edit_usuario').value = data.usuario;
+                    document.getElementById('edit_area_nivel1').value = data.area_nivel1;
+                    document.getElementById('edit_area_nivel2').value = data.area_nivel2 || '';
+                    document.getElementById('edit_area_nivel3').value = data.area_nivel3 || '';
+                    document.getElementById('edit_saldo_actual').value = data.saldo_actual;
+                    document.getElementById('edit_activo').checked = data.activo;
+                    
+                    const modalEditarAnexo = new bootstrap.Modal(document.getElementById('modalEditarAnexo'));
+                    modalEditarAnexo.show();
+                })
+                .catch(error => {
+                    showToast('Error', error.message, 'danger');
+                });
+            });
+        });
+        
+        // Actualizar anexo
+        document.getElementById('btnActualizarAnexo').addEventListener('click', function() {
+            const form = document.getElementById('formEditarAnexo');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+            
+            const formData = new FormData(form);
+            const anexoId = formData.get('id');
+            const anexoData = {
+                numero: formData.get('numero'),
+                usuario: formData.get('usuario'),
+                area_nivel1: formData.get('area_nivel1'),
+                area_nivel2: formData.get('area_nivel2') || null,
+                area_nivel3: formData.get('area_nivel3') || null,
+                pin: formData.get('pin') || null,
+                saldo_actual: parseFloat(formData.get('saldo_actual')) || 0,
+                activo: formData.get('activo') === 'on'
+            };
+            
+            fetch(`/anexo/${anexoId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(anexoData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.detail || 'Error al actualizar anexo');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                const modalEditarAnexo = bootstrap.Modal.getInstance(document.getElementById('modalEditarAnexo'));
+                modalEditarAnexo.hide();
+                
+                showToast('Éxito', 'Anexo actualizado correctamente', 'success');
+                
+                // Recargar página después de 1 segundo
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            })
+            .catch(error => {
+                showToast('Error', error.message, 'danger');
+            });
+        });
+        
+        // Preparar eliminación de anexo
+        document.querySelectorAll('.btn-eliminar').forEach(button => {
+            button.addEventListener('click', function() {
+                const anexoId = this.getAttribute('data-id');
+                const anexoNumero = this.getAttribute('data-numero');
+                
+                document.getElementById('anexo_a_eliminar').textContent = anexoNumero;
+                
+                const modalConfirmarEliminar = new bootstrap.Modal(document.getElementById('modalConfirmarEliminar'));
+                modalConfirmarEliminar.show();
+                
+                document.getElementById('btnConfirmarEliminar').onclick = function() {
+                    eliminarAnexo(anexoId);
+                };
+            });
+        });
+        
+        // Eliminar anexo
+        function eliminarAnexo(anexoId) {
+            fetch(`/anexo/${anexoId}`, {
+                method: 'DELETE'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.detail || 'Error al eliminar anexo');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                const modalConfirmarEliminar = bootstrap.Modal.getInstance(document.getElementById('modalConfirmarEliminar'));
+                modalConfirmarEliminar.hide();
+                
+                showToast('Éxito', 'Anexo desactivado correctamente', 'success');
+                
+                // Recargar página después de 1 segundo
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            })
+            .catch(error => {
+                showToast('Error', error.message, 'danger');
+            });
+        }
+        
+        // Guardar configuración de PIN
+        document.getElementById('btnGuardarConfiguracionPin').addEventListener('click', function() {
+            const form = document.getElementById('formConfiguracionPin');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+            
+            const formData = new FormData(form);
+            
+            fetch('/configuracion/pin_length', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: `pin_length=${formData.get('pin_length')}`
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.detail || 'Error al actualizar configuración');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                const modalConfiguracionPin = bootstrap.Modal.getInstance(document.getElementById('modalConfiguracionPin'));
+                modalConfiguracionPin.hide();
+                
+                showToast('Éxito', data.mensaje, 'success');
+                
+                // Recargar página después de 1 segundo
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            })
+            .catch(error => {
+                showToast('Error', error.message, 'danger');
+            });
+        });
+        
+        // Generar PINes masivamente
+        document.getElementById('btnGenerarPines').addEventListener('click', function() {
+            if (!confirm('¿Está seguro de que desea generar nuevos PINes para todos los anexos activos? Esta acción no se puede deshacer.')) {
+                return;
+            }
+            
+            fetch('/anexos/generar_pines', {
+                method: 'POST'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error al generar PINes');
+                }
+                
+                // Descargar CSV con PINes
+                const contentDisposition = response.headers.get('Content-Disposition');
+                const filename = contentDisposition ? contentDisposition.split('filename=')[1].replace(/["']/g, '') : 'pines_anexos.csv';
+                
+                return response.blob().then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                });
+            })
+            .then(() => {
+                showToast('Éxito', 'PINes generados correctamente. Se ha iniciado la descarga del archivo CSV.', 'success');
+            })
+            .catch(error => {
+                showToast('Error', error.message, 'danger');
+            });
+        });
+        
+        // Función para mostrar toast
+        function showToast(title, message, type) {
+            const toast = document.getElementById('toast');
+            const toastTitle = document.getElementById('toast-title');
+            const toastBody = document.getElementById('toast-body');
+            
+            toast.classList.remove('bg-success', 'bg-danger', 'bg-warning', 'bg-info');
+            
+            if (type === 'success') {
+                toast.classList.add('bg-success', 'text-white');
+            } else if (type === 'danger') {
+                toast.classList.add('bg-danger', 'text-white');
+            } else if (type === 'warning') {
+                toast.classList.add('bg-warning');
+            } else {
+                toast.classList.add('bg-info');
+            }
+            
+            toastTitle.textContent = title;
+            toastBody.textContent = message;
+            
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+        }
+    });
+</script>
+{% endblock %}                                

@@ -1,0 +1,154 @@
+<!-- templates/dashboard_fac_sync.html -->
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+    <h1>Sincronización de Códigos FAC con CUCM</h1>
+    
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Estadísticas de Sincronización</h5>
+                </div>
+                <div class="card-body">
+                    <p><strong>Total de códigos locales:</strong> {{ stats.total_local }}</p>
+                    <p><strong>Códigos sincronizados:</strong> {{ stats.total_synced }}</p>
+                    <p><strong>Estado:</strong> 
+                        {% if stats.total_local == stats.total_synced %}
+                            <span class="badge bg-success">Completamente sincronizado</span>
+                        {% elif stats.total_synced > 0 %}
+                            <span class="badge bg-warning">Parcialmente sincronizado</span>
+                        {% else %}
+                            <span class="badge bg-danger">No sincronizado</span>
+                        {% endif %}
+                    </p>
+                    
+                    {% if last_sync %}
+                        <p><strong>Última sincronización:</strong> {{ last_sync.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+                        <p><strong>Resultado:</strong> {{ last_sync.details }}</p>
+                    {% else %}
+                        <p><strong>Última sincronización:</strong> No hay datos</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Acciones de Sincronización</h5>
+                </div>
+                <div class="card-body">
+                    <button id="syncToCucm" class="btn btn-primary mb-2">Sincronizar a CUCM</button>
+                    <p class="text-muted">Envía los códigos locales al CUCM (crea/actualiza)</p>
+                    
+                    <button id="syncFromCucm" class="btn btn-success mb-2">Importar desde CUCM</button>
+                    <p class="text-muted">Obtiene los códigos desde CUCM e importa los nuevos</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <div class="card-header">
+            <h5>Historial de Sincronización</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Fecha/Hora</th>
+                            <th>Código</th>
+                            <th>Acción</th>
+                            <th>Usuario</th>
+                            <th>Detalles</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in audit_logs %}
+                        <tr>
+                            <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            <td>{{ log.authorization_code }}</td>
+                            <td>
+                                {% if log.action == 'sync' %}
+                                    <span class="badge bg-primary">Sincronización</span>
+                                {% elif log.action == 'sync_create' %}
+                                    <span class="badge bg-success">Creado en CUCM</span>
+                                {% elif log.action == 'sync_update' %}
+                                    <span class="badge bg-info">Actualizado en CUCM</span>
+                                {% elif log.action == 'sync_detect' %}
+                                    <span class="badge bg-warning">Detectado en CUCM</span>
+                                {% elif log.action == 'sync_complete' %}
+                                    <span class="badge bg-primary">Sincronización Completa</span>
+                                {% elif log.action == 'import_create' %}
+                                    <span class="badge bg-success">Importado de CUCM</span>
+                                {% elif log.action == 'import_update' %}
+                                    <span class="badge bg-info">Actualizado desde CUCM</span>
+                                {% elif log.action == 'import_complete' %}
+                                    <span class="badge bg-primary">Importación Completa</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ log.action }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ log.admin_user }}</td>
+                            <td>{{ log.details }}</td>
+                            <td>
+                                {% if log.success %}
+                                    <span class="badge bg-success">Éxito</span>
+                                {% else %}
+                                    <span class="badge bg-danger">Error</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center">No hay registros de auditoría</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- JavaScript -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Manejar sincronización a CUCM
+    document.getElementById('syncToCucm').addEventListener('click', function() {
+        if (confirm('¿Está seguro de sincronizar los códigos locales con CUCM?')) {
+            fetch('/api/fac/sync-with-cucm', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                setTimeout(() => location.reload(), 2000);
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+            });
+        }
+    });
+    
+    // Manejar importación desde CUCM
+    document.getElementById('syncFromCucm').addEventListener('click', function() {
+        if (confirm('¿Está seguro de importar códigos desde CUCM?')) {
+            fetch('/api/fac/sync-from-cucm', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                setTimeout(() => location.reload(), 2000);
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+            });
+        }
+    });
+});
+</script>
+{% endblock %}

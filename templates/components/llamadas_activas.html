@@ -1,0 +1,38 @@
+<!-- Contenido del componente de llamadas activas -->
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        <i class="bi bi-telephone-fill"></i> Llamadas Activas
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Origen</th>
+                        <th>Destino</th>
+                        <th>Inicio</th>
+                        <th>Duración</th>
+                        <th>Costo Est.</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if llamadas_activas %}
+                        {% for llamada in llamadas_activas %}
+                        <tr>
+                            <td>{{ llamada.origen }}</td>
+                            <td>{{ llamada.destino }}</td>
+                            <td>{{ llamada.inicio }}</td>
+                            <td>{{ llamada.duracion }}</td>
+                            <td>${{ "%.2f"|format(llamada.costo) }}</td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center">No hay llamadas activas en este momento</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Recarga Masiva{% endblock %}
+{% block header %}Recarga Masiva{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-upload"></i> Carga de Recargas Masivas</h5>
+            </div>
+            <div class="card-body">
+                {% if error %}
+                <div class="alert alert-danger" role="alert">
+                    <h4 class="alert-heading">Error</h4>
+                    <p>{{ error }}</p>
+                </div>
+                {% endif %}
+                
+                {% if success %}
+                <div class="alert alert-success" role="alert">
+                    <h4 class="alert-heading">Éxito</h4>
+                    <p>{{ success }}</p>
+                    
+                    {% if errores %}
+                    <hr>
+                    <p>Se encontraron los siguientes errores:</p>
+                    <ul>
+                        {% for error in errores %}
+                        <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                </div>
+                {% endif %}
+                
+                <div class="alert alert-info" role="alert">
+                    <h4 class="alert-heading">Instrucciones</h4>
+                    <p>Suba un archivo CSV con el siguiente formato:</p>
+                    <ul>
+                        <li>Primera columna: Número de anexo</li>
+                        <li>Segunda columna: Monto a recargar</li>
+                    </ul>
+                    <p>Ejemplo:</p>
+                    <pre>anexo,monto
+1001,10.00
+1002,15.50
+1003,5.25</pre>
+                </div>
+
+                <form method="post" enctype="multipart/form-data" class="mt-4">
+                    <div class="mb-3">
+                        <label for="file" class="form-label">Archivo CSV</label>
+                        <input type="file" class="form-control" id="file" name="file" accept=".csv" required>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-upload"></i> Procesar Recargas
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> Plantilla</h5>
+            </div>
+            <div class="card-body">
+                <p>Descargue la plantilla CSV para recargas masivas:</p>
+                <a href="/static/templates/recarga_masiva_template.csv" class="btn btn-primary">
+                    <i class="bi bi-download"></i> Descargar Plantilla
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

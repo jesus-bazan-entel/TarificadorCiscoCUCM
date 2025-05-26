@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Registro de Llamadas{% endblock %}
+{% block header %}Registro de Llamadas (CDR){% endblock %}
+
+{% block header_buttons %}
+<div class="btn-group">
+    <a href="/export/cdr/pdf" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-file-pdf"></i> Exportar PDF
+    </a>
+    <a href="/export/cdr/csv" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-file-excel"></i> Exportar CSV
+    </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-header bg-secondary text-white">
+        <h5 class="mb-0"><i class="bi bi-funnel"></i> Filtros</h5>
+    </div>
+    <div class="card-body">
+        <form method="get" action="/dashboard/cdr" class="row g-3">
+            <div class="col-md-3">
+                <label for="calling_number" class="form-label">Anexo</label>
+                <input type="text" class="form-control" id="calling_number" name="calling_number" value="{{ request.query_params.get('calling_number', '') }}">
+            </div>
+            <div class="col-md-3">
+                <label for="start_date" class="form-label">Fecha Inicio</label>
+                <input type="date" class="form-control" id="start_date" name="start_date" value="{{ request.query_params.get('start_date', '') }}">
+            </div>
+            <div class="col-md-3">
+                <label for="end_date" class="form-label">Fecha Fin</label>
+                <input type="date" class="form-control" id="end_date" name="end_date" value="{{ request.query_params.get('end_date', '') }}">
+            </div>
+            <div class="col-md-3">
+                <label for="min_duration" class="form-label">Duración Mínima (seg)</label>
+                <input type="number" class="form-control" id="min_duration" name="min_duration" value="{{ request.query_params.get('min_duration', '0') }}">
+            </div>
+            <div class="col-12 text-end">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-search"></i> Buscar
+                </button>
+                <a href="/dashboard/cdr" class="btn btn-secondary">
+                    <i class="bi bi-x-circle"></i> Limpiar
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Call Activity Chart -->
+    <div class="col-lg-7">
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Actividad de Llamadas por Hora</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="callChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Call Stats -->
+    <div class="col-lg-5">
+        <div class="card mb-4">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Estadísticas</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-6">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h2 id="totalCalls">{{ rows|length }}</h2>
+                                <p class="mb-0">Total Llamadas</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h2 id="avgDuration">{{ (rows|map(attribute=4)|map('int')|sum / rows|length)|round(0)|int if rows else 0 }}</h2>
+                                <p class="mb-0">Duración Promedio (seg)</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 mt-3">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h2 id="totalCost">${{ "%.2f"|format(rows|map(attribute=5)|sum if rows else 0) }}</h2>
+                                <p class="mb-0">Costo Total</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 mt-3">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h2 id="uniqueExtensions">{{ rows|map(attribute=0)|unique|list|length if rows else 0 }}</h2>
+                                <p class="mb-0">Anexos Distintos</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Call Records Table -->
+<div class="card">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="bi bi-table"></i> Detalle de Llamadas</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Anexo</th>
+                        <th>Destino</th>
+                        <th>Fecha/Hora</th>
+                        <th>Duración</th>
+                        <th>Duración Facturable</th>
+                        <th>Costo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td>{{ row[0] }}</td>
+                        <td>{{ row[1] }}</td>
+                        <td>{{ row[2].strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>{{ "%.4f"|format(row[4]) }} seg</td>
+                        <td>
+                            <span class="badge bg-info">{{ "%.4f"|format(row[6]|float) }} seg</span>
+                        </td>
+                        <td>${{ "%.2f"|format(row[5]|float) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card-footer">
+        <nav>
+            <ul class="pagination justify-content-center mb-0">
+                {% if page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ request.url.include_query_params(page=page-1) }}">Anterior</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <a class="page-link" href="#">Anterior</a>
+                </li>
+                {% endif %}
+                
+                <li class="page-item active">
+                    <a class="page-link" href="#">{{ page }}</a>
+                </li>
+                
+                {% if page < total_pages %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ request.url.include_query_params(page=page+1) }}">Siguiente</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <a class="page-link" href="#">Siguiente</a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    // Call Distribution Chart
+    const ctx = document.getElementById('callChart').getContext('2d');
+    const callChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: {{ labels|tojson }},
+            datasets: [{
+                label: 'Llamadas por Hora',
+                data: {{ data|tojson }},
+                backgroundColor: 'rgba(13, 110, 253, 0.8)',
+                borderColor: 'rgb(13, 110, 253)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Hora del día'
+                    }
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}

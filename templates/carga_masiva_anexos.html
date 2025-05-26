@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Carga Masiva de Anexos{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <h1 class="mt-4">Carga Masiva de Anexos</h1>
+    <ol class="breadcrumb mb-4">
+        <li class="breadcrumb-item"><a href="/dashboard/saldo">Dashboard</a></li>
+        <li class="breadcrumb-item"><a href="/dashboard/anexos">Anexos</a></li>
+        <li class="breadcrumb-item active">Carga Masiva</li>
+    </ol>
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="fas fa-file-import me-1"></i>
+            Carga Masiva de Anexos
+        </div>
+        <div class="card-body">
+            {% if error %}
+            <div class="alert alert-danger">
+                <h5>Error al procesar el archivo:</h5>
+                <p>{{ error }}</p>
+                {% if errores %}
+                <ul>
+                    {% for err in errores %}
+                    <li>{{ err }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            {% endif %}
+            
+            <form action="/dashboard/anexos/carga_masiva" method="post" enctype="multipart/form-data">
+                <div class="mb-3">
+                    <label for="file" class="form-label">Archivo CSV</label>
+                    <input type="file" class="form-control" id="file" name="file" accept=".csv" required>
+                    <div class="form-text">El archivo debe ser CSV con las siguientes columnas: numero, usuario, area_nivel1. Opcionalmente: area_nivel2, area_nivel3, pin, saldo_actual</div>
+                </div>
+                
+                <div class="alert alert-info">
+                    <h5>Formato esperado:</h5>
+                    <p>El archivo CSV debe tener los siguientes encabezados:</p>
+                    <ul>
+                        <li><strong>numero</strong>: Número de anexo (obligatorio)</li>
+                        <li><strong>usuario</strong>: Nombre del usuario (obligatorio)</li>
+                        <li><strong>area_nivel1</strong>: Área de nivel 1 (obligatorio)</li>
+                        <li><strong>area_nivel2</strong>: Área de nivel 2 (opcional)</li>
+                        <li><strong>area_nivel3</strong>: Área de nivel 3 (opcional)</li>
+                        <li><strong>pin</strong>: PIN personalizado (opcional, se generará automáticamente si no se proporciona)</li>
+                        <li><strong>saldo_actual</strong>: Saldo inicial (opcional, por defecto 0)</li>
+                    </ul>
+                    <p>Ejemplo:</p>
+                    <pre>numero,usuario,area_nivel1,area_nivel2,area_nivel3,pin,saldo_actual
+1001,Juan Pérez,Gerencia,Finanzas,Contabilidad,123456,100
+1002,María López,Operaciones,Soporte,,987654,50
+1003,Carlos Gómez,Ventas,,,123789,</pre>
+                </div>
+                
+                <div class="mb-3">
+                    <a href="/dashboard/anexos" class="btn btn-secondary me-2">Cancelar</a>
+                    <button type="submit" class="btn btn-primary">Cargar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}    

@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block title %}Estadísticas por Zona{% endblock %}
+
+{% block header %}Estadísticas por Zona{% endblock %}
+
+{% block header_buttons %}
+<button class="btn btn-secondary" onclick="refreshStats()">
+    <i class="bi bi-arrow-clockwise"></i> Actualizar
+</button>
+<button class="btn btn-primary" onclick="exportStats()">
+    <i class="bi bi-file-earmark-pdf"></i> Exportar PDF
+</button>
+{% endblock %}
+
+{% block content %}
+<!-- Filtros -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Filtros</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-4">
+                <label for="filterFechaInicio" class="form-label">Fecha Inicio</label>
+                <input type="date" class="form-control" id="filterFechaInicio" 
+                       value="{{ fecha_inicio }}">
+            </div>
+            <div class="col-md-4">
+                <label for="filterFechaFin" class="form-label">Fecha Fin</label>
+                <input type="date" class="form-control" id="filterFechaFin" 
+                       value="{{ fecha_fin }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">&nbsp;</label>
+                <button class="btn btn-primary d-block w-100" onclick="applyFilters()">
+                    <i class="bi bi-funnel"></i> Aplicar Filtros
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Resumen General -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <h5 class="card-title">Total Llamadas</h5>
+                <h2 class="card-text">{{ total_llamadas }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <h5 class="card-title">Minutos Totales</h5>
+                <h2 class="card-text">${{ "%.5f"|format(total_minutos) }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-warning">
+            <div class="card-body">
+                <h5 class="card-title">Costo Total</h5>
+                <h2 class="card-text">${{ "%.2f"|format(total_costo) }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-info">
+            <div class="card-body">
+                <h5 class="card-title">Zonas Activas</h5>
+                <h2 class="card-text">{{ zonas_activas }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Gráficos -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Llamadas por Zona</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="llamadasPorZonaChart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Costo por Zona</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="costoPorZonaChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tabla de Estadísticas Detalladas -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">Estadísticas Detalladas por Zona</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>Zona</th>
+                        <th>Total Llamadas</th>
+                        <th>Duración Total (min)</th>
+                        <th>Costo Total</th>
+                        <th>Costo Promedio</th>
+                        <th>Duración Promedio (min)</th>
+                        <th>% del Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stat in estadisticas %}
+                    <tr>
+                        <td>{{ stat.zona_nombre }}</td>
+                        <td>{{ stat.total_llamadas }}</td>
+                        <td>{{ "%.2f"|format(stat.duracion_total_minutos) }}</td>
+                        <td>${{ "%.2f"|format(stat.costo_total) }}</td>
+                        <td>${{ "%.2f"|format(stat.costo_promedio) }}</td>
+                        <td>{{ "%.2f"|format(stat.duracion_promedio_minutos) }}</td>
+                        <td>{{ "%.1f"|format(stat.porcentaje_total) }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    // Datos para los gráficos
+    const zonasLabels = {{ zonas_labels | tojson }};
+    const llamadasData = {{ llamadas_data | tojson }};
+    const costoData = {{ costo_data | tojson }};
+
+    // Configuración del gráfico de llamadas por zona
+    const ctxLlamadas = document.getElementById('llamadasPorZonaChart').getContext('2d');
+    new Chart(ctxLlamadas, {
+        type: 'bar',
+        data: {
+            labels: zonasLabels,
+            datasets: [{
+                label: 'Llamadas',
+                data: llamadasData,
+                backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Número de Llamadas'
+                    }
+                }
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Distribución de Llamadas por Zona'
+                }
+            }
+        }
+    });
+
+    // Configuración del gráfico de costo por zona
+    const ctxCosto = document.getElementById('costoPorZonaChart').getContext('2d');
+    new Chart(ctxCosto, {
+        type: 'pie',
+        data: {
+            labels: zonasLabels,
+            datasets: [{
+                data: costoData,
+                backgroundColor: [
+                    'rgba(255, 99, 132, 0.6)',
+                    'rgba(54, 162, 235, 0.6)',
+                    'rgba(255, 206, 86, 0.6)',
+                    'rgba(75, 192, 192, 0.6)',
+                    'rgba(153, 102, 255, 0.6)',
+                    'rgba(255, 159, 64, 0.6)'
+                ],
+                borderColor: [
+                    'rgba(255, 99, 132, 1)',
+                    'rgba(54, 162, 235, 1)',
+                    'rgba(255, 206, 86, 1)',
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(153, 102, 255, 1)',
+                    'rgba(255, 159, 64, 1)'
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Distribución de Costos por Zona'
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let value = context.raw;
+                            let total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            let percentage = ((value / total) * 100).toFixed(1);
+                            return `${context.label}: $${value.toFixed(2)} (${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Funciones de filtrado y exportación
+    function applyFilters() {
+        const fechaInicio = document.getElementById('filterFechaInicio').value;
+        const fechaFin = document.getElementById('filterFechaFin').value;
+        
+        window.location.href = `/dashboard/estadisticas_zona?fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
+    }
+
+    function refreshStats() {
+        window.location.reload();
+    }
+
+    function exportStats() {
+        const fechaInicio = document.getElementById('filterFechaInicio').value;
+        const fechaFin = document.getElementById('filterFechaFin').value;
+        
+        window.location.href = `/api/export/estadisticas_zona/pdf?fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
+    }
+
+    // Inicializar fechas si no están definidas
+    document.addEventListener('DOMContentLoaded', function() {
+        const fechaInicioInput = document.getElementById('filterFechaInicio');
+        const fechaFinInput = document.getElementById('filterFechaFin');
+        
+        if (!fechaInicioInput.value) {
+            // Establecer fecha de inicio hace 30 días
+            const hace30Dias = new Date();
+            hace30Dias.setDate(hace30Dias.getDate() - 30);
+            fechaInicioInput.value = hace30Dias.toISOString().split('T')[0];
+        }
+        
+        if (!fechaFinInput.value) {
+            // Establecer fecha de fin a hoy
+            const hoy = new Date();
+            fechaFinInput.value = hoy.toISOString().split('T')[0];
+        }
+    });
+</script>
+{% endblock %}

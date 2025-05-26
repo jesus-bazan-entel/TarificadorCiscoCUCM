@@ -1,0 +1,328 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Prefijos{% endblock %}
+
+{% block header %}Gestión de Prefijos {% if zona_actual %} - Zona: {{ zona_actual[1] }}{% endif %}{% endblock %}
+
+{% block header_buttons %}
+<button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createPrefijoModal">
+    <i class="bi bi-plus-circle"></i> Nuevo Prefijo
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Filtrar por Zona</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <select class="form-select" id="filterZona" onchange="filterByZona()">
+                    <option value="">Todas las Zonas</option>
+                    {% for zona in zonas %}
+                    <option value="{{ zona[0] }}" {% if zona_actual and zona[0] == zona_actual[0] %}selected{% endif %}>
+                        {{ zona[1] }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Zona</th>
+                        <th>Prefijo</th>
+                        <th>Longitud Mínima</th>
+                        <th>Longitud Máxima</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for prefijo in prefijos %}
+                    <tr>
+                        <td>{{ prefijo[0] }}</td>
+                        <td>{{ prefijo[5] }}</td>
+                        <td>{{ prefijo[2] }}</td>
+                        <td>{{ prefijo[3] }}</td>
+                        <td>{{ prefijo[4] }}</td>
+                        <td>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-sm btn-outline-primary" 
+                                        onclick="editPrefijo({{ prefijo[0] }}, {{ prefijo[1] }}, '{{ prefijo[2] }}', {{ prefijo[3] }}, {{ prefijo[4] }})">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" 
+                                        onclick="confirmDeletePrefijo({{ prefijo[0] }}, '{{ prefijo[2] }}')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para crear prefijo -->
+<div class="modal fade" id="createPrefijoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nuevo Prefijo</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createPrefijoForm">
+                    <div class="mb-3">
+                        <label for="createZonaId" class="form-label">Zona</label>
+                        <select class="form-select" id="createZonaId" required>
+                            {% for zona in zonas %}
+                            <option value="{{ zona[0] }}" {% if zona_actual and zona[0] == zona_actual[0] %}selected{% endif %}>
+                                {{ zona[1] }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="createPrefijo" class="form-label">Prefijo</label>
+                        <input type="text" class="form-control" id="createPrefijo" required>
+                        <div class="form-text">Ejemplo: "0800" para números gratuitos</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="createLongitudMinima" class="form-label">Longitud Mínima</label>
+                        <input type="number" class="form-control" id="createLongitudMinima" min="1" max="20" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="createLongitudMaxima" class="form-label">Longitud Máxima</label>
+                        <input type="number" class="form-control" id="createLongitudMaxima" min="1" max="20" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="createPrefijo()">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para editar prefijo -->
+<div class="modal fade" id="editPrefijoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Editar Prefijo</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editPrefijoForm">
+                    <input type="hidden" id="editPrefijoId">
+                    <div class="mb-3">
+                        <label for="editZonaId" class="form-label">Zona</label>
+                        <select class="form-select" id="editZonaId" required>
+                            {% for zona in zonas %}
+                            <option value="{{ zona[0] }}">{{ zona[1] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editPrefijo" class="form-label">Prefijo</label>
+                        <input type="text" class="form-control" id="editPrefijo" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editLongitudMinima" class="form-label">Longitud Mínima</label>
+                        <input type="number" class="form-control" id="editLongitudMinima" min="1" max="20" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editLongitudMaxima" class="form-label">Longitud Máxima</label>
+                        <input type="number" class="form-control" id="editLongitudMaxima" min="1" max="20" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="updatePrefijo()">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para confirmar eliminación -->
+<div class="modal fade" id="deletePrefijoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirmar Eliminación</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>¿Está seguro que desea eliminar el prefijo <strong id="deletePrefijoNombre"></strong>?</p>
+                <p class="text-danger">Esta acción no se puede deshacer y podría afectar la tarificación de llamadas.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger" onclick="deletePrefijo()">Eliminar</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    let prefijoIdToDelete = null;
+
+    // Filtrar por zona
+    function filterByZona() {
+        const zonaId = document.getElementById('filterZona').value;
+        if (zonaId) {
+            window.location.href = `/dashboard/prefijos?zona_id=${zonaId}`;
+        } else {
+            window.location.href = '/dashboard/prefijos';
+        }
+    }
+
+    // Función para crear un nuevo prefijo
+    function createPrefijo() {
+        const zonaId = parseInt(document.getElementById('createZonaId').value);
+        const prefijo = document.getElementById('createPrefijo').value;
+        const longitudMinima = parseInt(document.getElementById('createLongitudMinima').value);
+        const longitudMaxima = parseInt(document.getElementById('createLongitudMaxima').value);
+
+        if (!prefijo) {
+            alert('El prefijo es obligatorio');
+            return;
+        }
+
+        if (longitudMinima > longitudMaxima) {
+            alert('La longitud mínima no puede ser mayor que la longitud máxima');
+            return;
+        }
+
+        fetch('/api/prefijos', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                zona_id: zonaId,
+                prefijo: prefijo,
+                longitud_minima: longitudMinima,
+                longitud_maxima: longitudMaxima
+            }),
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Error al crear el prefijo');
+            }
+            return response.json();
+        })
+        .then(data => {
+            bootstrap.Modal.getInstance(document.getElementById('createPrefijoModal')).hide();
+            window.location.reload();
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+        });
+    }
+
+    // Función para abrir el modal de edición
+    function editPrefijo(id, zonaId, prefijo, longitudMinima, longitudMaxima) {
+        document.getElementById('editPrefijoId').value = id;
+        document.getElementById('editZonaId').value = zonaId;
+        document.getElementById('editPrefijo').value = prefijo;
+        document.getElementById('editLongitudMinima').value = longitudMinima;
+        document.getElementById('editLongitudMaxima').value = longitudMaxima;
+
+        const modal = new bootstrap.Modal(document.getElementById('editPrefijoModal'));
+        modal.show();
+    }
+
+    // Función para actualizar un prefijo
+    function updatePrefijo() {
+        const id = document.getElementById('editPrefijoId').value;
+        const zonaId = parseInt(document.getElementById('editZonaId').value);
+        const prefijo = document.getElementById('editPrefijo').value;
+        const longitudMinima = parseInt(document.getElementById('editLongitudMinima').value);
+        const longitudMaxima = parseInt(document.getElementById('editLongitudMaxima').value);
+
+        if (!prefijo) {
+            alert('El prefijo es obligatorio');
+            return;
+        }
+
+        if (longitudMinima > longitudMaxima) {
+            alert('La longitud mínima no puede ser mayor que la longitud máxima');
+            return;
+        }
+
+        fetch(`/api/prefijos/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                zona_id: zonaId,
+                prefijo: prefijo,
+                longitud_minima: longitudMinima,
+                longitud_maxima: longitudMaxima
+            }),
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Error al actualizar el prefijo');
+            }
+            return response.json();
+        })
+        .then(data => {
+            bootstrap.Modal.getInstance(document.getElementById('editPrefijoModal')).hide();
+            window.location.reload();
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+        });
+    }
+
+    // Función para confirmar eliminación
+    function confirmDeletePrefijo(id, prefijo) {
+        prefijoIdToDelete = id;
+        document.getElementById('deletePrefijoNombre').textContent = prefijo;
+
+        const modal = new bootstrap.Modal(document.getElementById('deletePrefijoModal'));
+        modal.show();
+    }
+
+    // Función para eliminar un prefijo
+    function deletePrefijo() {
+        if (!prefijoIdToDelete) return;
+
+        fetch(`/api/prefijos/${prefijoIdToDelete}`, {
+            method: 'DELETE',
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Error al eliminar el prefijo');
+            }
+            return response.json();
+        })
+        .then(data => {
+            bootstrap.Modal.getInstance(document.getElementById('deletePrefijoModal')).hide();
+            window.location.reload();
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+            bootstrap.Modal.getInstance(document.getElementById('deletePrefijoModal')).hide();
+        });
+    }
+</script>
+{% endblock %}
