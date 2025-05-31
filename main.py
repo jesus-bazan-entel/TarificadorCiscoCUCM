@@ -1034,7 +1034,8 @@ def check_balance(calling_number: str):
     with SessionLocal() as db:
         query = text("SELECT saldo FROM saldo_anexos WHERE calling_number = :calling_number")
         saldo = db.execute(query, {"calling_number": calling_number}).fetchone()
-        return {"has_balance": saldo and saldo[0] > 0}
+        return {"has_balance": True}
+        #return {"has_balance": saldo and saldo[0] > 0}
 
 @app.post("/recargar/{calling_number}/{amount}")
 async def recargar_saldo(calling_number: str, amount: float, user=Depends(admin_only)):
@@ -1311,43 +1312,147 @@ async def form_recarga_masiva(request: Request, user=Depends(admin_only)):
 @app.post("/dashboard/recarga_masiva")
 async def recarga_masiva(request: Request, file: UploadFile = File(...), user=Depends(admin_only)):
     db = SessionLocal()
-    content = await file.read()
-    content = content.decode('utf-8').splitlines()
-    reader = csv.reader(content)
-    next(reader)
+    
+    try:
+        # Leer el contenido del archivo
+        content = await file.read()
+        
+        # Determinar tipo de archivo por extensión
+        filename = file.filename.lower()
+        
+        # Lista para almacenar las filas a procesar
+        rows = []
+        
+        # Procesar según el tipo de archivo
+        if filename.endswith('.xlsx') or filename.endswith('.xls'):
+            # Archivo Excel
+            try:
+                import io
+                import openpyxl
+                
+                # Cargar el archivo Excel
+                wb = openpyxl.load_workbook(io.BytesIO(content))
+                ws = wb.active
+                
+                # Leer filas (omitir la primera fila de encabezados)
+                first_row = True
+                for row in ws.rows:
+                    if first_row:
+                        first_row = False
+                        continue
+                    
+                    if len(row) >= 2 and row[0].value and row[1].value:
+                        rows.append([str(row[0].value), str(row[1].value)])
+            except Exception as e:
+                return templates.TemplateResponse("recarga_masiva.html", {
+                    "request": request, 
+                    "user": user,
+                    "error": f"Error procesando archivo Excel: {str(e)}"
+                })
+        else:
+            # Archivo CSV - intentar con diferentes codificaciones
+            encodings = ['utf-8', 'latin-1', 'windows-1252', 'iso-8859-1']
+            decoded = False
+            
+            for encoding in encodings:
+                try:
+                    # Intentar decodificar con esta codificación
+                    text_content = content.decode(encoding).splitlines()
+                    reader = csv.reader(text_content)
+                    
+                    # Omitir encabezados
+                    next(reader, None)
+                    
+                    # Leer filas
+                    for row in reader:
+                        if len(row) >= 2:
+                            rows.append(row)
+                    
+                    decoded = True
+                    break  # Si llegamos aquí, la decodificación fue exitosa
+                except UnicodeDecodeError:
+                    continue  # Probar con la siguiente codificación
+            
+            if not decoded:
+                return templates.TemplateResponse("recarga_masiva.html", {
+                    "request": request, 
+                    "user": user,
+                    "error": "No se pudo decodificar el archivo. Asegúrese de que sea un CSV válido."
+                })
+        
+        # Procesar las filas y actualizar la base de datos
+        procesados = 0
+        errores = []
+        
+        for row in rows:
+            try:
+                if len(row) >= 2:
+                    # Extraer anexo y monto
+                    calling_number = str(row[0]).strip()
+                    
+                    # Convertir monto a float, manejando posibles formatos
+                    try:
+                        amount = float(str(row[1]).strip().replace(',', '.'))
+                    except ValueError:
+                        errores.append(f"Error en anexo {calling_number}: '{row[1]}' no es un monto válido.")
+                        continue
+                    
+                    # Buscar saldo actual
+                    saldo_query = text("SELECT saldo FROM saldo_anexos WHERE calling_number = :calling_number")
+                    saldo_actual = db.execute(saldo_query, {"calling_number": calling_number}).fetchone()
 
-    for row in reader:
-        if len(row) >= 2:
-            calling_number, amount = row[0], float(row[1])
+                    # Actualizar o insertar saldo
+                    if saldo_actual:
+                        update_query = text(
+                            "UPDATE saldo_anexos SET saldo = saldo + :amount, fecha_ultima_recarga = CURRENT_TIMESTAMP WHERE calling_number = :calling_number"
+                        )
+                        db.execute(update_query, {"amount": amount, "calling_number": calling_number})
+                    else:
+                        insert_query = text(
+                            "INSERT INTO saldo_anexos (calling_number, saldo, fecha_ultima_recarga) VALUES (:calling_number, :amount, CURRENT_TIMESTAMP)"
+                        )
+                        db.execute(insert_query, {"calling_number": calling_number, "amount": amount})
 
-            saldo_query = text("SELECT saldo FROM saldo_anexos WHERE calling_number = :calling_number")
-            saldo_actual = db.execute(saldo_query, {"calling_number": calling_number}).fetchone()
-
-            if saldo_actual:
-                update_query = text(
-                    "UPDATE saldo_anexos SET saldo = saldo + :amount, fecha_ultima_recarga = CURRENT_TIMESTAMP WHERE calling_number = :calling_number"
-                )
-                db.execute(update_query, {"amount": amount, "calling_number": calling_number})
-            else:
-                insert_query = text(
-                    "INSERT INTO saldo_anexos (calling_number, saldo, fecha_ultima_recarga) VALUES (:calling_number, :amount, CURRENT_TIMESTAMP)"
-                )
-                db.execute(insert_query, {"calling_number": calling_number, "amount": amount})
-
-            audit_query = text(
-                "INSERT INTO saldo_auditoria (calling_number, saldo_anterior, saldo_nuevo, tipo_accion) "
-                "VALUES (:calling_number, :saldo_anterior, :saldo_nuevo, 'recarga_masiva')"
-            )
-            db.execute(audit_query, {
-                "calling_number": calling_number,
-                "saldo_anterior": saldo_actual[0] if saldo_actual else 0,
-                "saldo_nuevo": saldo_actual[0] + Decimal(str(amount)) if saldo_actual else Decimal(str(amount))
-                #"saldo_nuevo": saldo_actual[0] + amount if saldo_actual else amount
-            })
-
-    db.commit()
-    db.close()
-    return RedirectResponse(url="/dashboard/saldo", status_code=302)
+                    # Registrar en auditoría
+                    audit_query = text(
+                        "INSERT INTO saldo_auditoria (calling_number, saldo_anterior, saldo_nuevo, tipo_accion) "
+                        "VALUES (:calling_number, :saldo_anterior, :saldo_nuevo, 'recarga_masiva')"
+                    )
+                    db.execute(audit_query, {
+                        "calling_number": calling_number,
+                        "saldo_anterior": saldo_actual[0] if saldo_actual else 0,
+                        "saldo_nuevo": saldo_actual[0] + Decimal(str(amount)) if saldo_actual else Decimal(str(amount))
+                    })
+                    
+                    procesados += 1
+            except Exception as e:
+                errores.append(f"Error procesando anexo {calling_number}: {str(e)}")
+        
+        # Confirmar transacción
+        db.commit()
+        
+        # Generar mensaje de éxito
+        success_message = f"Se procesaron {procesados} recargas exitosamente."
+        
+        # Devolver respuesta
+        return templates.TemplateResponse("recarga_masiva.html", {
+            "request": request, 
+            "user": user,
+            "success": success_message,
+            "errores": errores if errores else None
+        })
+            
+    except Exception as e:
+        # Revertir cambios en caso de error
+        db.rollback()
+        
+        return templates.TemplateResponse("recarga_masiva.html", {
+            "request": request, 
+            "user": user,
+            "error": f"Error procesando el archivo: {str(e)}"
+        })
+    finally:
+        db.close()
 
 @app.get("/")
 def root():
@@ -1373,7 +1478,7 @@ async def dashboard_anexos(request: Request,
     
     # Construir la consulta base para contar y para obtener registros
     base_query_str = """
-        SELECT a.id, a.numero, a.usuario, a.area_nivel1, a.area_nivel2, a.area_nivel3, a.saldo_actual, a.activo, s.saldo
+        SELECT a.id, a.numero, a.usuario, a.area_nivel1, a.area_nivel2, a.area_nivel3, a.saldo_actual, a.pin, a.activo, s.saldo
         FROM anexos a
         LEFT JOIN saldo_anexos s ON a.numero = s.calling_number
         WHERE 1=1
@@ -1472,7 +1577,7 @@ class AnexoCreate(BaseModel):
     area_nivel2: Optional[str] = None
     area_nivel3: Optional[str] = None
     pin: Optional[str] = None
-    saldo_actual: float
+    saldo_actual: Optional[float] = 0
     activo: Optional[bool] = True
     
     # Validadores (opcional)
@@ -1488,11 +1593,11 @@ class AnexoCreate(BaseModel):
             raise ValueError('El usuario no puede estar vacío')
         return v
     
-    @validator('saldo_actual')
-    def saldo_valid(cls, v):
-        if v < 0:
-            raise ValueError('El saldo inicial no puede ser negativo')
-        return v
+    #@validator('saldo_actual')
+    #def saldo_valid(cls, v):
+    #    if v < 0:
+    #        raise ValueError('El saldo inicial no puede ser negativo')
+    #    return v
 
 
 @app.post("/anexo")
@@ -1508,7 +1613,7 @@ async def crear_anexo(anexo: AnexoCreate, user=Depends(admin_only)):
     print(f"  Área Nivel 2: '{getattr(anexo, 'area_nivel2', '')}'")
     print(f"  Área Nivel 3: '{getattr(anexo, 'area_nivel3', '')}'")
     print(f"  PIN: '{'*****' if anexo.pin else 'No proporcionado'}'")
-    print(f"  Saldo Actual: {anexo.saldo_actual}")
+    #print(f"  Saldo Actual: {anexo.saldo_actual}")
     print(f"  Activo: {getattr(anexo, 'activo', True)}")
             
     try:    
@@ -1541,11 +1646,11 @@ async def crear_anexo(anexo: AnexoCreate, user=Depends(admin_only)):
             print(f"PIN generado automáticamente: {pin}")
         
         # Hashear el PIN para almacenarlo de forma segura
-        try:
-            hashed_pin = pwd_context.hash(pin)
-        except Exception as e:
-            print(f"Error al hashear PIN: {e}")
-            raise HTTPException(status_code=500, detail="Error al procesar el PIN")
+        #try:
+        #    hashed_pin = pwd_context.hash(pin)
+        #except Exception as e:
+        #    print(f"Error al hashear PIN: {e}")
+        #    raise HTTPException(status_code=500, detail="Error al procesar el PIN")
         
         # Preparar los parámetros para la inserción, garantizando valores por defecto para campos opcionales
         params = {
@@ -1554,16 +1659,15 @@ async def crear_anexo(anexo: AnexoCreate, user=Depends(admin_only)):
             "area_nivel1": anexo.area_nivel1,
             "area_nivel2": anexo.area_nivel2 if hasattr(anexo, 'area_nivel2') and anexo.area_nivel2 else "",
             "area_nivel3": anexo.area_nivel3 if hasattr(anexo, 'area_nivel3') and anexo.area_nivel3 else "",
-            "pin": hashed_pin,
-            "saldo_actual": anexo.saldo_actual,
+            "pin": pin,
             "activo": anexo.activo if hasattr(anexo, 'activo') else True
         }
         
         # Insertar el nuevo anexo
         try:
             insert_query = text("""
-                INSERT INTO anexos (numero, usuario, area_nivel1, area_nivel2, area_nivel3, pin, saldo_actual, activo)
-                VALUES (:numero, :usuario, :area_nivel1, :area_nivel2, :area_nivel3, :pin, :saldo_actual, :activo)
+                INSERT INTO anexos (numero, usuario, area_nivel1, area_nivel2, area_nivel3, pin, activo)
+                VALUES (:numero, :usuario, :area_nivel1, :area_nivel2, :area_nivel3, :pin, :activo)
                 RETURNING id
             """)
             
@@ -1649,7 +1753,6 @@ async def actualizar_anexo(anexo_id: int, anexo: AnexoCreate, user=Depends(admin
         "area_nivel1": anexo.area_nivel1,
         "area_nivel2": anexo.area_nivel2,
         "area_nivel3": anexo.area_nivel3,
-        "saldo_actual": anexo.saldo_actual,
         "activo": anexo.activo
     }
     
@@ -1660,95 +1763,19 @@ async def actualizar_anexo(anexo_id: int, anexo: AnexoCreate, user=Depends(admin
         area_nivel1 = :area_nivel1,
         area_nivel2 = :area_nivel2,
         area_nivel3 = :area_nivel3,
-        saldo_actual = :saldo_actual,
         activo = :activo
     """
     
     # Si se proporciona PIN, actualizarlo
     if anexo.pin:
-        hashed_pin = pwd_context.hash(anexo.pin)
+        #hashed_pin = pwd_context.hash(anexo.pin)
         update_query_str += ", pin = :pin"
-        params["pin"] = hashed_pin
+        params["pin"] = anexo.pin
     
     update_query_str += " WHERE id = :anexo_id"
     update_query = text(update_query_str)
     
     db.execute(update_query, params)
-    
-    # Actualizar saldo_anexos si cambia el número o el saldo
-    if anexo.numero != old_numero or anexo.saldo_actual != old_saldo:
-        # Si cambió el número, actualizar calling_number en saldo_anexos
-        if anexo.numero != old_numero:
-            update_saldo_query = text("""
-                UPDATE saldo_anexos 
-                SET calling_number = :new_numero 
-                WHERE calling_number = :old_numero
-            """)
-            db.execute(update_saldo_query, {"new_numero": anexo.numero, "old_numero": old_numero})
-            
-            # Actualizar calling_number en saldo_auditoria
-            update_audit_query = text("""
-                UPDATE saldo_auditoria 
-                SET calling_number = :new_numero 
-                WHERE calling_number = :old_numero
-            """)
-            db.execute(update_audit_query, {"new_numero": anexo.numero, "old_numero": old_numero})
-            
-            # Actualizar calling_number en recargas
-            update_recargas_query = text("""
-                UPDATE recargas 
-                SET calling_number = :new_numero 
-                WHERE calling_number = :old_numero
-            """)
-            db.execute(update_recargas_query, {"new_numero": anexo.numero, "old_numero": old_numero})
-            
-            # Actualizar calling_number y called_number en cdr
-            update_cdr_calling_query = text("""
-                UPDATE cdr 
-                SET calling_number = :new_numero 
-                WHERE calling_number = :old_numero
-            """)
-            db.execute(update_cdr_calling_query, {"new_numero": anexo.numero, "old_numero": old_numero})
-            
-            update_cdr_called_query = text("""
-                UPDATE cdr 
-                SET called_number = :new_numero 
-                WHERE called_number = :old_numero
-            """)
-            db.execute(update_cdr_called_query, {"new_numero": anexo.numero, "old_numero": old_numero})
-        
-        # Si cambió el saldo, actualizar saldo en saldo_anexos
-        if anexo.saldo_actual != old_saldo:
-            # Verificar si existe en saldo_anexos
-            check_saldo_query = text("SELECT saldo FROM saldo_anexos WHERE calling_number = :numero")
-            existing_saldo = db.execute(check_saldo_query, {"numero": anexo.numero}).fetchone()
-            
-            if existing_saldo:
-                # Actualizar saldo existente
-                update_saldo_query = text("""
-                    UPDATE saldo_anexos 
-                    SET saldo = :saldo, fecha_ultima_recarga = CURRENT_TIMESTAMP 
-                    WHERE calling_number = :numero
-                """)
-                db.execute(update_saldo_query, {"saldo": anexo.saldo_actual, "numero": anexo.numero})
-            else:
-                # Crear nuevo registro de saldo
-                insert_saldo_query = text("""
-                    INSERT INTO saldo_anexos (calling_number, saldo, fecha_ultima_recarga)
-                    VALUES (:numero, :saldo, CURRENT_TIMESTAMP)
-                """)
-                db.execute(insert_saldo_query, {"numero": anexo.numero, "saldo": anexo.saldo_actual})
-            
-            # Registrar en auditoría
-            audit_query = text("""
-                INSERT INTO saldo_auditoria (calling_number, saldo_anterior, saldo_nuevo, tipo_accion)
-                VALUES (:numero, :saldo_anterior, :saldo_nuevo, 'modificacion_anexo')
-            """)
-            db.execute(audit_query, {
-                "numero": anexo.numero, 
-                "saldo_anterior": old_saldo, 
-                "saldo_nuevo": anexo.saldo_actual
-            })
     
     db.commit()
     db.close()
@@ -1762,24 +1789,36 @@ async def eliminar_anexo(anexo_id: int, user=Depends(admin_only)):
         
     db = SessionLocal()
     
-    # Verificar si el anexo existe
-    check_query = text("SELECT numero FROM anexos WHERE id = :anexo_id")
-    existing = db.execute(check_query, {"anexo_id": anexo_id}).fetchone()
-    
-    if not existing:
+    try:
+        # Verificar si el anexo existe
+        check_query = text("SELECT numero FROM anexos WHERE id = :anexo_id")
+        existing = db.execute(check_query, {"anexo_id": anexo_id}).fetchone()
+        
+        if not existing:
+            raise HTTPException(status_code=404, detail="Anexo no encontrado")
+        
+        numero_anexo = existing[0]
+        
+        # Eliminación física (delete del registro)
+        delete_query = text("DELETE FROM anexos WHERE id = :anexo_id")
+        result = db.execute(delete_query, {"anexo_id": anexo_id})
+        
+        # Verificar que se eliminó efectivamente
+        if result.rowcount == 0:
+            raise HTTPException(status_code=500, detail="Error al eliminar el anexo")
+        
+        db.commit()
+        
+        return {"mensaje": f"Anexo {numero_anexo} eliminado exitosamente"}
+        
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+    finally:
         db.close()
-        raise HTTPException(status_code=404, detail="Anexo no encontrado")
-    
-    numero_anexo = existing[0]
-    
-    # Eliminación lógica (cambiar estado a inactivo)
-    update_query = text("UPDATE anexos SET activo = FALSE WHERE id = :anexo_id")
-    db.execute(update_query, {"anexo_id": anexo_id})
-    
-    db.commit()
-    db.close()
-    
-    return {"mensaje": "Anexo desactivado exitosamente"}
 
 # Configuración de longitud de PIN
 @app.put("/configuracion/pin_length")
@@ -1885,151 +1924,333 @@ async def form_carga_masiva_anexos(request: Request, user=Depends(admin_only)):
     return templates.TemplateResponse("carga_masiva_anexos.html", {"request": request, "user": user})
 
 @app.post("/dashboard/anexos/carga_masiva")
-async def carga_masiva_anexos(request: Request, file: UploadFile = File(...), user=Depends(admin_only)):
+async def carga_masiva_anexos(
+    request: Request, 
+    file: UploadFile = File(...), 
+    generar_pin: bool = Form(True),
+    continuar_errores: bool = Form(False),
+    user=Depends(admin_only)
+):
+    """
+    Procesa un archivo CSV o Excel para cargar anexos masivamente.
+    
+    Params:
+    - file: Archivo CSV o Excel con los datos de anexos
+    - generar_pin: Si se debe generar PIN automáticamente cuando no se proporciona
+    - continuar_errores: Si se debe continuar procesando a pesar de errores
+    """
     if isinstance(user, RedirectResponse):
         return user
-        
+    
     db = SessionLocal()
     
-    # Obtener longitud configurada del PIN
-    pin_length_query = text("SELECT valor FROM configuracion WHERE clave = 'pin_length'")
-    pin_length_row = db.execute(pin_length_query).fetchone()
-    pin_length = int(pin_length_row[0]) if pin_length_row else 6
-    
-    content = await file.read()
-    content = content.decode('utf-8').splitlines()
-    reader = csv.reader(content)
-    headers = next(reader)  # Leer encabezados
-    
-    # Verificar encabezados mínimos
-    required_headers = ["numero", "usuario", "area_nivel1"]
-    missing_headers = [h for h in required_headers if h not in headers]
-    
-    if missing_headers:
-        return templates.TemplateResponse("carga_masiva_anexos.html", {
-            "request": request,
-            "user": user,
-            "error": f"Faltan encabezados obligatorios: {', '.join(missing_headers)}"
-        })
-    
-    # Mapear índices de columnas
-    col_indices = {
-        "numero": headers.index("numero"),
-        "usuario": headers.index("usuario"),
-        "area_nivel1": headers.index("area_nivel1"),
-        "area_nivel2": -1 if "area_nivel2" not in headers else headers.index("area_nivel2"),
-        "area_nivel3": -1 if "area_nivel3" not in headers else headers.index("area_nivel3"),
-        "pin": -1 if "pin" not in headers else headers.index("pin"),
-        "saldo_actual": -1 if "saldo_actual" not in headers else headers.index("saldo_actual")
-    }
-    
-    import random
-    resultados = []
+    # Variables para el seguimiento
+    procesados = 0
+    exitosos = 0
     errores = []
     
-    for i, row in enumerate(reader, start=2):  # start=2 para contar desde la línea 2 (después de headers)
-        if not row or len(row) < 3:  # Verificar que haya al menos los campos obligatorios
-            continue
-            
-        try:
-            numero = row[col_indices["numero"]].strip()
-            usuario = row[col_indices["usuario"]].strip()
-            area_nivel1 = row[col_indices["area_nivel1"]].strip()
-            
-            # Campos opcionales
-            area_nivel2 = None if col_indices["area_nivel2"] == -1 else row[col_indices["area_nivel2"]].strip() if len(row) > col_indices["area_nivel2"] else None
-            area_nivel3 = None if col_indices["area_nivel3"] == -1 else row[col_indices["area_nivel3"]].strip() if len(row) > col_indices["area_nivel3"] else None
-            pin = None if col_indices["pin"] == -1 else row[col_indices["pin"]].strip() if len(row) > col_indices["pin"] else None
-            saldo_actual = 0
-            if col_indices["saldo_actual"] != -1 and len(row) > col_indices["saldo_actual"] and row[col_indices["saldo_actual"]].strip():
+    try:
+        # Leer el contenido del archivo
+        content = await file.read()
+        
+        # Determinar tipo de archivo por extensión
+        filename = file.filename.lower()
+        
+        # Lista para almacenar las filas a procesar
+        rows = []
+        headers = []
+        
+        # Procesar según el tipo de archivo
+        if filename.endswith('.xlsx') or filename.endswith('.xls'):
+            # Procesar archivo Excel
+            try:
+                # Intentar usar la biblioteca openpyxl si está disponible
                 try:
-                    saldo_actual = float(row[col_indices["saldo_actual"]].strip())
-                except ValueError:
-                    saldo_actual = 0
+                    import io
+                    import openpyxl
+                    
+                    # Cargar el archivo Excel
+                    wb = openpyxl.load_workbook(io.BytesIO(content))
+                    ws = wb.active
+                    
+                    # Leer encabezados (primera fila)
+                    headers = [str(cell.value).strip() if cell.value else "" for cell in next(ws.rows)]
+                    
+                    # Verificar encabezados mínimos requeridos
+                    if not headers or 'numero' not in headers or 'usuario' not in headers or 'area_nivel1' not in headers:
+                        return templates.TemplateResponse("carga_masiva_anexos.html", {
+                            "request": request, 
+                            "user": user,
+                            "error": "El archivo no tiene los encabezados requeridos: numero, usuario, area_nivel1"
+                        })
+                    
+                    # Leer filas (omitir la primera fila de encabezados)
+                    for row in list(ws.rows)[1:]:
+                        # Convertir celdas a valores de texto
+                        row_values = [str(cell.value).strip() if cell.value is not None else "" for cell in row]
+                        if any(row_values):  # Omitir filas vacías
+                            rows.append(row_values)
+                    
+                except ImportError:
+                    # Si openpyxl no está disponible, intentar usar xlrd (para archivos .xls)
+                    try:
+                        import io
+                        import xlrd
+                        
+                        # Abrir el libro Excel
+                        workbook = xlrd.open_workbook(file_contents=content)
+                        sheet = workbook.sheet_by_index(0)
+                        
+                        # Leer encabezados (primera fila)
+                        headers = [str(sheet.cell_value(0, col)).strip() for col in range(sheet.ncols)]
+                        
+                        # Verificar encabezados mínimos requeridos
+                        if not headers or 'numero' not in headers or 'usuario' not in headers or 'area_nivel1' not in headers:
+                            return templates.TemplateResponse("carga_masiva_anexos.html", {
+                                "request": request, 
+                                "user": user,
+                                "error": "El archivo no tiene los encabezados requeridos: numero, usuario, area_nivel1"
+                            })
+                        
+                        # Leer filas (omitir la primera fila de encabezados)
+                        for row_idx in range(1, sheet.nrows):
+                            row_values = [str(sheet.cell_value(row_idx, col)).strip() for col in range(sheet.ncols)]
+                            if any(row_values):  # Omitir filas vacías
+                                rows.append(row_values)
+                    
+                    except ImportError:
+                        # Si ninguna biblioteca Excel está disponible, intentar con pandas
+                        try:
+                            import io
+                            import pandas as pd
+                            
+                            # Leer el archivo Excel con pandas
+                            df = pd.read_excel(io.BytesIO(content))
+                            
+                            # Verificar encabezados mínimos requeridos
+                            df_columns = df.columns.tolist()
+                            headers = [str(col).strip() for col in df_columns]
+                            
+                            if not headers or 'numero' not in headers or 'usuario' not in headers or 'area_nivel1' not in headers:
+                                return templates.TemplateResponse("carga_masiva_anexos.html", {
+                                    "request": request, 
+                                    "user": user,
+                                    "error": "El archivo no tiene los encabezados requeridos: numero, usuario, area_nivel1"
+                                })
+                            
+                            # Convertir DataFrame a lista de filas
+                            rows = df.values.tolist()
+                            
+                        except ImportError:
+                            # Si ninguna de las bibliotecas está disponible
+                            return templates.TemplateResponse("carga_masiva_anexos.html", {
+                                "request": request, 
+                                "user": user,
+                                "error": "No se pueden procesar archivos Excel en este servidor. Por favor, exporte a CSV e intente de nuevo."
+                            })
             
-            # Verificar si el anexo ya existe
-            check_query = text("SELECT id FROM anexos WHERE numero = :numero")
-            existing = db.execute(check_query, {"numero": numero}).fetchone()
+            except Exception as e:
+                print(f"Error procesando archivo Excel: {str(e)}")
+                return templates.TemplateResponse("carga_masiva_anexos.html", {
+                    "request": request, 
+                    "user": user,
+                    "error": f"Error procesando archivo Excel: {str(e)}"
+                })
+        
+        else:
+            # Archivo CSV - intentar con diferentes codificaciones
+            encodings = ['utf-8', 'latin-1', 'windows-1252', 'iso-8859-1']
+            decoded = False
             
-            if existing:
-                errores.append(f"Línea {i}: El anexo {numero} ya existe")
-                continue
+            for encoding in encodings:
+                try:
+                    # Intentar decodificar con esta codificación
+                    text_content = content.decode(encoding).splitlines()
+                    reader = csv.reader(text_content)
+                    
+                    # Leer encabezados
+                    headers = next(reader, None)
+                    
+                    # Verificar encabezados mínimos requeridos
+                    if not headers or 'numero' not in headers or 'usuario' not in headers or 'area_nivel1' not in headers:
+                        return templates.TemplateResponse("carga_masiva_anexos.html", {
+                            "request": request, 
+                            "user": user,
+                            "error": "El archivo no tiene los encabezados requeridos: numero, usuario, area_nivel1"
+                        })
+                    
+                    # Leer filas
+                    rows = list(reader)
+                    decoded = True
+                    print(f"✅ Archivo decodificado correctamente con codificación: {encoding}")
+                    break  # Si llegamos aquí, la decodificación fue exitosa
+                except UnicodeDecodeError:
+                    print(f"❌ Fallo al decodificar con {encoding}")
+                    continue  # Probar con la siguiente codificación
             
-            # Generar PIN si no se proporcionó
-            if not pin:
-                pin = ''.join(random.choices('0123456789', k=pin_length))
-            
-            # Hashear el PIN
-            hashed_pin = pwd_context.hash(pin)
-            
-            # Insertar el nuevo anexo
-            insert_query = text("""
-                INSERT INTO anexos (numero, usuario, area_nivel1, area_nivel2, area_nivel3, pin, saldo_actual, activo)
-                VALUES (:numero, :usuario, :area_nivel1, :area_nivel2, :area_nivel3, :pin, :saldo_actual, TRUE)
-                RETURNING id
-            """)
-            
-            result = db.execute(insert_query, {
-                "numero": numero,
-                "usuario": usuario,
-                "area_nivel1": area_nivel1,
-                "area_nivel2": area_nivel2,
-                "area_nivel3": area_nivel3,
-                "pin": hashed_pin,
-                "saldo_actual": saldo_actual,
-                "activo": True
+            if not decoded:
+                return templates.TemplateResponse("carga_masiva_anexos.html", {
+                    "request": request, 
+                    "user": user,
+                    "error": "No se pudo decodificar el archivo. Asegúrese de que sea un CSV válido."
+                })
+        
+        # Si no hay filas para procesar
+        if not rows:
+            return templates.TemplateResponse("carga_masiva_anexos.html", {
+                "request": request, 
+                "user": user,
+                "error": "El archivo no contiene datos para procesar."
             })
-            
-            anexo_id = result.fetchone()[0]
-            
-            # Inicializar saldo en la tabla saldo_anexos si tiene saldo inicial
-            if saldo_actual > 0:
-                saldo_query = text("""
-                    INSERT INTO saldo_anexos (calling_number, saldo, fecha_ultima_recarga)
-                    VALUES (:numero, :saldo, CURRENT_TIMESTAMP)
-                """)
-                db.execute(saldo_query, {"numero": numero, "saldo": saldo_actual})
+        
+        # Mapear índices de columnas
+        column_indices = {}
+        for col in ['numero', 'usuario', 'area_nivel1', 'area_nivel2', 'area_nivel3', 'pin', 'saldo_actual']:
+            column_indices[col] = headers.index(col) if col in headers else -1
+        
+        # Obtener longitud configurada del PIN
+        pin_length_query = text("SELECT valor FROM configuracion WHERE clave = 'pin_length'")
+        pin_length_row = db.execute(pin_length_query).fetchone()
+        pin_length = int(pin_length_row[0]) if pin_length_row else 6  # Valor por defecto: 6
+        
+        # Procesar filas
+        for i, row in enumerate(rows, start=2):  # start=2 para considerar la fila 1 como encabezados
+            try:
+                # Asegurarse de que la fila tiene suficientes columnas
+                if len(row) <= max(idx for idx in column_indices.values() if idx >= 0):
+                    # Extender la fila con valores vacíos si es necesario
+                    row.extend([''] * (max(idx for idx in column_indices.values() if idx >= 0) - len(row) + 1))
                 
-                # Registrar en auditoría
-                audit_query = text("""
-                    INSERT INTO saldo_auditoria (calling_number, saldo_anterior, saldo_nuevo, tipo_accion)
-                    VALUES (:numero, 0, :saldo, 'creacion_masiva_anexo')
+                # Validar que tenga los campos requeridos
+                if column_indices['numero'] < 0 or column_indices['usuario'] < 0 or column_indices['area_nivel1'] < 0:
+                    raise ValueError("No se encontraron las columnas requeridas: numero, usuario, area_nivel1")
+                
+                # Verificar que los campos requeridos no estén vacíos
+                if not row[column_indices['numero']] or not row[column_indices['usuario']] or not row[column_indices['area_nivel1']]:
+                    raise ValueError("Faltan valores en campos requeridos: numero, usuario, area_nivel1")
+                
+                # Extraer datos básicos
+                numero = str(row[column_indices['numero']]).strip()
+                usuario = str(row[column_indices['usuario']]).strip()
+                area_nivel1 = str(row[column_indices['area_nivel1']]).strip()
+                
+                # Extraer datos opcionales
+                area_nivel2 = str(row[column_indices['area_nivel2']]).strip() if column_indices['area_nivel2'] >= 0 and len(row) > column_indices['area_nivel2'] else ''
+                area_nivel3 = str(row[column_indices['area_nivel3']]).strip() if column_indices['area_nivel3'] >= 0 and len(row) > column_indices['area_nivel3'] else ''
+                
+                # Extraer PIN si existe
+                pin = None
+                if column_indices['pin'] >= 0 and len(row) > column_indices['pin'] and row[column_indices['pin']]:
+                    pin = str(row[column_indices['pin']]).strip()
+                
+                # Extraer saldo inicial si existe
+                saldo_actual = 0.0
+                if column_indices['saldo_actual'] >= 0 and len(row) > column_indices['saldo_actual'] and row[column_indices['saldo_actual']]:
+                    try:
+                        saldo_value = str(row[column_indices['saldo_actual']]).strip().replace(',', '.')
+                        # Manejar casos donde el valor puede ser un float en formato de texto o tener caracteres no numéricos
+                        saldo_actual = float(''.join(c for c in saldo_value if c.isdigit() or c == '.'))
+                    except ValueError:
+                        print(f"⚠️ Error convirtiendo saldo: {row[column_indices['saldo_actual']]}")
+                        saldo_actual = 0.0
+                
+                # Verificar si el número ya existe
+                check_query = text("SELECT id FROM anexos WHERE numero = :numero")
+                existing = db.execute(check_query, {"numero": numero}).fetchone()
+                
+                if existing:
+                    raise ValueError(f"El anexo {numero} ya existe")
+                
+                # Generar PIN si no se proporcionó y está activada la opción
+                if not pin and generar_pin:
+                    import random
+                    pin = ''.join(random.choices('0123456789', k=pin_length))
+                    print(f"PIN generado para {numero}: {pin}")
+                
+                # Hashear el PIN
+                from passlib.context import CryptContext
+                pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+                hashed_pin = pwd_context.hash(pin) if pin else None
+                
+                # Insertar el nuevo anexo
+                insert_query = text("""
+                    INSERT INTO anexos (numero, usuario, area_nivel1, area_nivel2, area_nivel3, pin, saldo_actual, activo)
+                    VALUES (:numero, :usuario, :area_nivel1, :area_nivel2, :area_nivel3, :pin, :saldo_actual, TRUE)
+                    RETURNING id
                 """)
-                db.execute(audit_query, {"numero": numero, "saldo": saldo_actual})
-            
-            resultados.append({"numero": numero, "pin": pin})
-            
-        except Exception as e:
-            errores.append(f"Línea {i}: {str(e)}")
-    
-    db.commit()
-    db.close()
-    
-    # Generar CSV con PINs para descarga
-    if resultados:
-        csv_content = io.StringIO()
-        writer = csv.writer(csv_content)
-        writer.writerow(["Número de Anexo", "PIN"])
+                
+                result = db.execute(insert_query, {
+                    "numero": numero,
+                    "usuario": usuario,
+                    "area_nivel1": area_nivel1,
+                    "area_nivel2": area_nivel2,
+                    "area_nivel3": area_nivel3,
+                    "pin": hashed_pin,
+                    "saldo_actual": saldo_actual,
+                    "activo": True
+                })
+                
+                anexo_id = result.fetchone()[0]
+                
+                # Inicializar saldo en la tabla saldo_anexos si tiene saldo inicial
+                if saldo_actual > 0:
+                    saldo_query = text("""
+                        INSERT INTO saldo_anexos (calling_number, saldo, fecha_ultima_recarga)
+                        VALUES (:numero, :saldo, CURRENT_TIMESTAMP)
+                    """)
+                    db.execute(saldo_query, {"numero": numero, "saldo": saldo_actual})
+                    
+                    # Registrar en auditoría
+                    audit_query = text("""
+                        INSERT INTO saldo_auditoria (calling_number, saldo_anterior, saldo_nuevo, tipo_accion)
+                        VALUES (:numero, 0, :saldo, 'creacion_anexo')
+                    """)
+                    db.execute(audit_query, {"numero": numero, "saldo": saldo_actual})
+                
+                procesados += 1
+                exitosos += 1
+                
+            except Exception as e:
+                # Registrar error
+                error_msg = f"Fila {i}: {str(e)}"
+                errores.append(error_msg)
+                
+                # Si no debemos continuar ante errores, terminar
+                if not continuar_errores:
+                    db.rollback()
+                    return templates.TemplateResponse("carga_masiva_anexos.html", {
+                        "request": request,
+                        "user": user,
+                        "error": f"Error en la fila {i}: {str(e)}. Proceso abortado.",
+                        "errores": errores
+                    })
         
-        for resultado in resultados:
-            writer.writerow([resultado["numero"], resultado["pin"]])
+        # Confirmar cambios en la base de datos
+        db.commit()
         
-        csv_content.seek(0)
+        # Mensaje de éxito
+        success_message = f"Se procesaron {procesados} registros. {exitosos} anexos creados con éxito."
+        if errores:
+            success_message += f" Se encontraron {len(errores)} errores."
         
-        return StreamingResponse(
-            io.BytesIO(csv_content.getvalue().encode()),
-            media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename=nuevos_anexos_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"}
-        )
-    else:
         return templates.TemplateResponse("carga_masiva_anexos.html", {
             "request": request,
             "user": user,
-            "error": "No se pudo procesar ningún anexo" if not errores else None,
-            "errores": errores
+            "success": success_message,
+            "errores": errores if errores else None
         })
-    
-
+        
+    except Exception as e:
+        # En caso de error general, hacer rollback
+        db.rollback()
+        return templates.TemplateResponse("carga_masiva_anexos.html", {
+            "request": request,
+            "user": user,
+            "error": f"Error general: {str(e)}"
+        })
+    finally:
+        db.close()
+        
 # Modelo Pydantic para la configuración de CUCM
 class CucmConfigModel(BaseModel):
     server_ip: str
@@ -2055,7 +2276,7 @@ async def get_cucm_config(user=Depends(admin_only)):
         # Si no hay configuración, devolver valores por defecto
         db.close()
         return {
-            "server_ip": "190.105.250.127",
+            "server_ip": "10.224.0.10",
             "server_port": 2748,
             "username": "jtapiuser",
             "password": "********",  # Ocultamos la contraseña real
@@ -2411,7 +2632,7 @@ async def control_cucm_service(action: str, user=Depends(admin_only)):
 def get_service_config():
     # Retorna la configuración del servicio
     return {
-        "cucm.host": "190.105.250.127",
+        "cucm.host": "10.224.0.10",
         "cucm.user": "jtapiuser",
         "cucm.password": "fr4v4t3l",
         "cucm.appinfo": "TarificadorApp",
@@ -2738,7 +2959,6 @@ def export_cdr_pdf(
                         <th>Facturada</th>
                         <th>Zona</th>
                         <th>Costo</th>
-                        <th>Estado</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -2750,8 +2970,7 @@ def export_cdr_pdf(
                         <td>{{ "%d:%02d"|format(row[4]//60, row[4]%60) }}</td>
                         <td>{{ "%d:%02d"|format(row[5]//60, row[5]%60) }}</td>
                         <td>{{ row[8] or 'N/A' }}</td>
-                        <td>${{ "%.4f"|format(row[6]) }}</td>
-                        <td>{{ row[7] }}</td>
+                        <td>S/{{ "%.4f"|format(row[6]) }}</td>
                     </tr>
                 {% endfor %}
                 </tbody>
@@ -2853,11 +3072,12 @@ def export_cdr_csv(
         writer = csv.writer(output)
         
         # Escribir encabezados
+        #se retiro columna row[7]: Estado
         writer.writerow([
             'Origen', 'Destino', 'Fecha/Hora Inicio', 'Fecha/Hora Fin', 
-            'Duración Total (seg)', 'Duración Facturable (seg)', 'Costo', 
-            'Estado', 'Zona', 'Hora Contestado', 'Hora Marcación',
-            'Hora Alcance Red', 'Hora Timbrando', 'Dirección', 'Código Liberación'
+            'Duracion Total (seg)', 'Duracion Facturable (seg)', 'Costo', 
+            'Zona', 'Hora Contestado', 'Hora Marcacion',
+            'Hora Alcance Red', 'Hora Timbrando', 'Direccion', 'Codigo Liberacion'
         ])
         
         # Escribir datos
@@ -2870,6 +3090,7 @@ def export_cdr_csv(
             network_reached_time = row[11].strftime('%Y-%m-%d %H:%M:%S') if row[11] else ''
             network_alerting_time = row[12].strftime('%Y-%m-%d %H:%M:%S') if row[12] else ''
             
+            #se retiro columna row[7]: status
             writer.writerow([
                 row[0],                     # calling_number
                 row[1],                     # called_number
@@ -2878,7 +3099,6 @@ def export_cdr_csv(
                 row[4],                     # duration_seconds
                 row[5],                     # duration_billable
                 f"{float(row[6]):.4f}",     # cost
-                row[7],                     # status
                 row[8],                     # zona_nombre
                 connect_time,               # connect_time
                 dialing_time,               # dialing_time
@@ -2906,7 +3126,259 @@ def export_cdr_csv(
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
+
+@app.get("/export/cdr/excel")
+def export_cdr_excel(
+    user=Depends(admin_only),
+    start_date: str = Query(None),
+    end_date: str = Query(None),
+    calling_number: str = Query(None),
+    called_number: str = Query(None)
+):
+    """Exporta los registros CDR a un archivo Excel (XLS)."""
+    from sqlalchemy import text
+    from datetime import datetime
+    import io
+    
+    db = SessionLocal()
+    
+    try:
+        # Construir la consulta base
+        query = """
+            SELECT c.calling_number, c.called_number, 
+                   c.start_time, c.end_time, c.duration_seconds, 
+                   c.duration_billable, c.cost, c.status,
+                   z.nombre as zona_nombre, c.connect_time,
+                   c.dialing_time, c.network_reached_time, c.network_alerting_time,
+                   c.direction, c.release_cause
+            FROM cdr c
+            LEFT JOIN zonas z ON c.zona_id = z.id
+            WHERE 1=1
+        """
+        
+        params = {}
+        
+        # Agregar filtros si se proporcionan
+        if calling_number:
+            query += " AND c.calling_number = :calling_number"
+            params["calling_number"] = calling_number
+        
+        if called_number:
+            query += " AND c.called_number = :called_number"
+            params["called_number"] = called_number
+        
+        if start_date:
+            query += " AND c.start_time >= :start_date"
+            params["start_date"] = f"{start_date} 00:00:00"
+        
+        if end_date:
+            query += " AND c.end_time <= :end_date"
+            params["end_date"] = f"{end_date} 23:59:59"
+        
+        # Ordenar por fecha descendente
+        query += " ORDER BY c.start_time DESC LIMIT 10000"
+        
+        # Ejecutar la consulta usando text()
+        rows = db.execute(text(query), params).fetchall()
+        
+        # Lista de encabezados
+        headers = [
+            'Origen', 'Destino', 'Fecha/Hora Inicio', 'Fecha/Hora Fin', 
+            'Duración Total (seg)', 'Duración Facturable (seg)', 'Costo', 
+            'Zona', 'Hora Contestado', 'Hora Marcación',
+            'Hora Alcance Red', 'Hora Timbrando', 'Dirección', 'Código Liberación'
+        ]
+        
+        # Preparar los datos para Excel
+        excel_data = []
+        
+        # Añadir encabezados
+        excel_data.append(headers)
+        
+        # Añadir filas de datos
+        for row in rows:
+            # Formatear fechas y valores numéricos
+            start_time = row[2].strftime('%Y-%m-%d %H:%M:%S') if row[2] else ''
+            end_time = row[3].strftime('%Y-%m-%d %H:%M:%S') if row[3] else ''
+            connect_time = row[9].strftime('%Y-%m-%d %H:%M:%S') if row[9] else ''
+            dialing_time = row[10].strftime('%Y-%m-%d %H:%M:%S') if row[10] else ''
+            network_reached_time = row[11].strftime('%Y-%m-%d %H:%M:%S') if row[11] else ''
+            network_alerting_time = row[12].strftime('%Y-%m-%d %H:%M:%S') if row[12] else ''
             
+            excel_data.append([
+                row[0],                     # calling_number
+                row[1],                     # called_number
+                start_time,                 # start_time
+                end_time,                   # end_time
+                row[4],                     # duration_seconds
+                row[5],                     # duration_billable
+                float(row[6]),              # cost (como número para Excel)
+                row[8],                     # zona_nombre
+                connect_time,               # connect_time
+                dialing_time,               # dialing_time
+                network_reached_time,       # network_reached_time
+                network_alerting_time,      # network_alerting_time
+                row[13],                    # direction
+                row[14]                     # release_cause
+            ])
+        
+        # Nombre del archivo
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"cdr_report_{timestamp}.xls"
+        
+        # Intentar usar diferentes bibliotecas para generar el Excel
+        excel_binary = None
+        
+        # Intento 1: Usar xlwt (mejor para XLS)
+        try:
+            import xlwt
+            
+            # Crear libro y hoja
+            workbook = xlwt.Workbook()
+            worksheet = workbook.add_sheet('CDR Report')
+            
+            # Estilos
+            header_style = xlwt.easyxf('font: bold on; align: wrap on, vert centre, horiz center; pattern: pattern solid, fore_color gray25')
+            date_style = xlwt.easyxf(num_format_str='YYYY-MM-DD HH:MM:SS')
+            number_style = xlwt.easyxf(num_format_str='0.0000')
+            
+            # Establecer anchos de columna
+            for i in range(len(headers)):
+                worksheet.col(i).width = 256 * 20  # Aproximadamente 20 caracteres de ancho
+            
+            # Escribir datos
+            for row_idx, row_data in enumerate(excel_data):
+                for col_idx, cell_value in enumerate(row_data):
+                    # Aplicar estilos según el tipo de datos
+                    if row_idx == 0:  # Encabezados
+                        worksheet.write(row_idx, col_idx, cell_value, header_style)
+                    elif col_idx in [2, 3, 8, 9, 10, 11]:  # Columnas de fecha
+                        worksheet.write(row_idx, col_idx, cell_value, date_style)
+                    elif col_idx == 6:  # Columna de costo
+                        worksheet.write(row_idx, col_idx, cell_value, number_style)
+                    else:
+                        worksheet.write(row_idx, col_idx, cell_value)
+            
+            # Guardar a un BytesIO
+            output = io.BytesIO()
+            workbook.save(output)
+            excel_binary = output.getvalue()
+            
+            print("✅ Excel generado con xlwt")
+            
+        except ImportError:
+            # xlwt no está disponible, intentar con openpyxl
+            try:
+                import openpyxl
+                from openpyxl.styles import Font, Alignment, PatternFill
+                from openpyxl.utils import get_column_letter
+                
+                # Crear libro y hoja
+                workbook = openpyxl.Workbook()
+                worksheet = workbook.active
+                worksheet.title = 'CDR Report'
+                
+                # Estilos
+                header_font = Font(bold=True)
+                header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                header_fill = PatternFill(start_color='DDDDDD', end_color='DDDDDD', fill_type='solid')
+                
+                # Establecer anchos de columna
+                for i in range(len(headers)):
+                    worksheet.column_dimensions[get_column_letter(i+1)].width = 20
+                
+                # Escribir datos
+                for row_idx, row_data in enumerate(excel_data, 1):  # openpyxl es 1-based
+                    for col_idx, cell_value in enumerate(row_data, 1):
+                        cell = worksheet.cell(row=row_idx, column=col_idx, value=cell_value)
+                        
+                        # Aplicar estilos a los encabezados
+                        if row_idx == 1:
+                            cell.font = header_font
+                            cell.alignment = header_alignment
+                            cell.fill = header_fill
+                
+                # Guardar a un BytesIO
+                output = io.BytesIO()
+                workbook.save(output)
+                excel_binary = output.getvalue()
+                
+                print("✅ Excel generado con openpyxl")
+                
+            except ImportError:
+                # openpyxl no está disponible, intentar con pandas
+                try:
+                    import pandas as pd
+                    
+                    # Convertir datos a DataFrame (omitir la fila de encabezados)
+                    df = pd.DataFrame(excel_data[1:], columns=headers)
+                    
+                    # Guardar a un BytesIO
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df.to_excel(writer, sheet_name='CDR Report', index=False)
+                        
+                        # Dar formato a la hoja
+                        workbook = writer.book
+                        worksheet = writer.sheets['CDR Report']
+                        
+                        # Formato para encabezados
+                        header_format = workbook.add_format({
+                            'bold': True,
+                            'bg_color': '#DDDDDD',
+                            'align': 'center',
+                            'valign': 'vcenter',
+                            'text_wrap': True
+                        })
+                        
+                        # Aplicar formato a encabezados
+                        for col_num, value in enumerate(df.columns.values):
+                            worksheet.write(0, col_num, value, header_format)
+                            worksheet.set_column(col_num, col_num, 20)
+                    
+                    excel_binary = output.getvalue()
+                    
+                    print("✅ Excel generado con pandas")
+                    
+                except ImportError:
+                    # Si ninguna biblioteca Excel está disponible, generar CSV como alternativa
+                    print("⚠️ No hay bibliotecas Excel disponibles, generando CSV")
+                    import csv
+                    
+                    output = io.StringIO()
+                    writer = csv.writer(output)
+                    
+                    # Escribir todas las filas
+                    for row_data in excel_data:
+                        writer.writerow(row_data)
+                    
+                    # Cambiar el nombre de archivo a CSV
+                    filename = f"cdr_report_{timestamp}.csv"
+                    
+                    # Devolver el CSV como respuesta
+                    output.seek(0)
+                    db.close()
+                    return StreamingResponse(
+                        io.StringIO(output.getvalue()),
+                        media_type="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename={filename}"}
+                    )
+        
+        db.close()
+        
+        # Devolver el Excel como respuesta
+        return StreamingResponse(
+            io.BytesIO(excel_binary),
+            media_type="application/vnd.ms-excel",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except Exception as e:
+        db.close()
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+                
 # Exportar reporte de consumo por zona
 @app.get("/export/consumo_zona/pdf")
 async def export_consumo_zona_pdf(user=Depends(admin_only)):
@@ -3641,7 +4113,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 def get_cucm_client():
     """Crea un cliente SOAP para conectarse a CUCM"""
     # Cargar configuración
-    CUCM_ADDRESS = os.getenv('CUCM_ADDRESS', '190.105.250.127')
+    CUCM_ADDRESS = os.getenv('CUCM_ADDRESS', '10.224.0.10')
     CUCM_USERNAME = os.getenv('CUCM_USERNAME', 'admin')
     CUCM_PASSWORD = os.getenv('CUCM_PASSWORD', 'fr4v4t3l')
     WSDL_FILE = 'schema/AXLAPI.wsdl'
@@ -4208,7 +4680,7 @@ async def test_fac_raw(user=Depends(admin_only)):
     
     try:
         # Configuración
-        cucm_address = "190.105.250.127"
+        cucm_address = "10.224.0.10"
         cucm_username = "admin" 
         cucm_password = "fr4v4t3l"
         
