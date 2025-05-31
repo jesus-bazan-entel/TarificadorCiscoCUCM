@@ -62,8 +62,8 @@
                             <th>Área Nivel 1</th>
                             <th>Área Nivel 2</th>
                             <th>Área Nivel 3</th>
-                            <th>Saldo Actual</th>
                             <th>Saldo Disponible</th>
+                            <th>PIN</th>
                             <th>Estado</th>
                             <th>Acciones</th>
                         </tr>
@@ -76,8 +76,8 @@
                             <td>{{ row.area_nivel1 }}</td>
                             <td>{{ row.area_nivel2 or "" }}</td>
                             <td>{{ row.area_nivel3 or "" }}</td>
-                            <td class="text-end">${{ "%.2f"|format(row.saldo_actual) }}</td>
-                            <td class="text-end">${{ "%.2f"|format(row.saldo or 0) }}</td>
+                            <td class="text-end">S/{{ "%.2f"|format(row.saldo or 0) }}</td>
+                            <td>{{ row.pin }}</td>
                             <td>
                                 {% if row.activo %}
                                 <span class="badge bg-success">Activo</span>
@@ -208,13 +208,6 @@
                             </button>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="saldo_actual" class="form-label">Saldo Inicial</label>
-                        <div class="input-group">
-                            <span class="input-group-text">$</span>
-                            <input type="number" class="form-control" id="saldo_actual" name="saldo_actual" step="0.01" min="0" value="0">
-                        </div>
-                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -265,13 +258,6 @@
                             </button>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="edit_saldo_actual" class="form-label">Saldo Actual</label>
-                        <div class="input-group">
-                            <span class="input-group-text">$</span>
-                            <input type="number" class="form-control" id="edit_saldo_actual" name="saldo_actual" step="0.01" min="0" value="0">
-                        </div>
-                    </div>
                     <div class="mb-3 form-check">
                         <input type="checkbox" class="form-check-input" id="edit_activo" name="activo" checked>
                         <label class="form-check-label" for="edit_activo">Activo</label>
@@ -320,12 +306,12 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <p>¿Está seguro de que desea desactivar el anexo <span id="anexo_a_eliminar"></span>?</p>
+                <p>¿Está seguro de que desea eliminar el anexo <span id="anexo_a_eliminar"></span>?</p>
                 <p class="text-danger">Esta acción puede afectar la operación del sistema.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="button" class="btn btn-danger" id="btnConfirmarEliminar">Desactivar</button>
+                <button type="button" class="btn btn-danger" id="btnConfirmarEliminar">Eliminar</button>
             </div>
         </div>
     </div>
@@ -411,7 +397,6 @@
                 area_nivel2: formData.get('area_nivel2') || null,
                 area_nivel3: formData.get('area_nivel3') || null,
                 pin: formData.get('pin') || null,
-                saldo_actual: parseFloat(formData.get('saldo_actual')) || 0,
                 activo: true
             };
             
@@ -473,7 +458,6 @@
                     document.getElementById('edit_area_nivel1').value = data.area_nivel1;
                     document.getElementById('edit_area_nivel2').value = data.area_nivel2 || '';
                     document.getElementById('edit_area_nivel3').value = data.area_nivel3 || '';
-                    document.getElementById('edit_saldo_actual').value = data.saldo_actual;
                     document.getElementById('edit_activo').checked = data.activo;
                     
                     const modalEditarAnexo = new bootstrap.Modal(document.getElementById('modalEditarAnexo'));
@@ -502,7 +486,7 @@
                 area_nivel2: formData.get('area_nivel2') || null,
                 area_nivel3: formData.get('area_nivel3') || null,
                 pin: formData.get('pin') || null,
-                saldo_actual: parseFloat(formData.get('saldo_actual')) || 0,
+                saldo: 0,
                 activo: formData.get('activo') === 'on'
             };
             
