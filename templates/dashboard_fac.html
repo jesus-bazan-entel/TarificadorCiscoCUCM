@@ -3,6 +3,16 @@
 <div class="container-fluid">
     <h1 class="h3 mb-4 text-gray-800">Gestión de Códigos FAC</h1>
     
+    <!-- Banner de Información CUCM -->
+    <div class="alert alert-info alert-dismissible fade show" role="alert">
+        <i class="fas fa-info-circle"></i>
+        <strong>CUCM como Autoridad:</strong> Los códigos se sincronizan automáticamente desde CUCM hacia la base de datos local. 
+        Use "Sincronizar con CUCM" para importar códigos faltantes.
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+        </button>
+    </div>
+    
     <!-- Alertas -->
     <div id="alertContainer"></div>
 
@@ -52,25 +62,11 @@
             <h6 class="m-0 font-weight-bold text-primary">Acciones en Bloque</h6>
             <div>
                 <button id="syncWithCucm" class="btn btn-warning">
-                    <i class="bi bi-sync"></i> Sincronizar con CUCM
+                    <i class="fas fa-download"></i> Sincronizar desde CUCM
                 </button>
                 <a href="/dashboard/fac/historial" class="btn btn-secondary">
-                    <i class="bi bi-clock-history"></i> Ver Historial
+                    <i class="fas fa-history"></i> Ver Historial
                 </a>
-            </div>
-        </div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-6">
-                    <a href="/dashboard/fac/mass-assign" class="btn btn-success btn-block">
-                        <i class="bi bi-upload"></i> Asignación Masiva
-                    </a>
-                </div>
-                <div class="col-md-6">
-                    <a href="/api/fac/export/csv" class="btn btn-info btn-block">
-                        <i class="bi bi-download"></i> Exportar a CSV
-                    </a>
-                </div>
             </div>
         </div>
     </div>
@@ -90,64 +86,76 @@
                             <th>Nombre</th>
                             <th>Nivel</th>
                             <th>Descripción</th>
-                            <th>Estado</th>
-                            <th>Sincronizado</th>
                             <th>Acciones</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for fac in fac_list %}
                         <tr>
-                            <td>{{ fac.id if 'id' in fac else 'N/A' }}</td>
-                            <td>{{ fac.code }}</td>
+                            <td>{{ fac.id if fac.get('id') else 'N/A' }}</td>
+                            <td><strong>{{ fac.code }}</strong></td>
                             <td>{{ fac.name }}</td>
-                            <td>{{ fac.level }}</td>
-                            <td>{{ fac.description if 'description' in fac else '' }}</td>
+                            <!-- ✅ CORRECCIÓN: Usar authorization_level en lugar de level -->
                             <td>
-                                {% if fac.source == 'local' %}
-                                    {% if fac.active %}
-                                        <span class="badge bg-success">Activo</span>
-                                    {% else %}
-                                        <span class="badge bg-danger">Inactivo</span>
-                                    {% endif %}
-                                    
-                                    {% if fac.cucm_synced %}
-                                        <span class="badge bg-info">Sincronizado</span>
-                                    {% else %}
-                                        <span class="badge bg-warning">No sincronizado</span>
-                                    {% endif %}
-                                {% elif fac.source == 'cucm' %}
-                                    <span class="badge bg-secondary">CUCM</span>
-                                {% else %}
-                                    <span class="badge bg-primary">{{ fac.source }}</span>
-                                {% endif %}
+                                <strong>
+                                    {{ fac.level }}
+                                </strong>
                             </td>
                             <td>
+                                <small class="text-muted">
+                                    {% if fac.description %}
+                                        {{ fac.description[:50] }}{% if fac.description|length > 50 %}...{% endif %}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </small>
+                            </td>
+                            <!-- Acciones -->
+                            <td>
                                 {% if fac.source == 'local' %}
-                                    <button class="btn btn-primary btn-sm edit-fac" 
-                                            data-id="{{ fac.id }}"
-                                            data-code="{{ fac.code }}" 
-                                            data-name="{{ fac.name }}"
-                                            data-level="{{ fac.level }}">
-                                        Editar
-                                    </button>
-                                    <button class="btn btn-danger btn-sm delete-fac" 
-                                            data-code="{{ fac.code }}">
-                                        Eliminar
-                                    </button>
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-primary edit-fac" 
+                                                data-id="{{ fac.id }}"
+                                                data-code="{{ fac.code }}" 
+                                                data-name="{{ fac.name }}"
+                                                data-level="{{ fac.authorization_level if fac.authorization_level is not none else fac.level }}"
+                                                data-desc="{{ fac.description or '' }}"
+                                                data-active="{{ fac.get('active', true)|lower }}"
+                                                title="Editar código">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-danger delete-fac" 
+                                                data-id="{{ fac.id }}"
+                                                data-code="{{ fac.code }}"
+                                                title="Eliminar PIN">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
                                 {% elif fac.source == 'cucm' %}
                                     <button class="btn btn-success btn-sm import-fac"
                                             data-code="{{ fac.code }}"
                                             data-name="{{ fac.name }}"
-                                            data-level="{{ fac.level }}">
-                                        Importar
+                                            data-level="{{ fac.authorization_level if fac.authorization_level is not none else fac.level }}"
+                                            title="Importar desde CUCM">
+                                        <i class="fas fa-download"></i> Importar
                                     </button>
                                 {% endif %}
                             </td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="7" class="text-center">No hay códigos FAC configurados</td>
+                            <td colspan="6" class="text-center">
+                                <div class="py-4">
+                                    <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                                    <h5 class="text-muted">No hay códigos FAC configurados</h5>
+                                    <p class="text-muted">Cree un nuevo código o sincronice desde CUCM.</p>
+                                    <div class="btn-group">
+                                        <button id="firstTimeSync" class="btn btn-primary">
+                                            <i class="fas fa-sync-alt"></i> Sincronizar desde CUCM
+                                        </button>
+                                    </div>
+                                </div>
+                            </td>
                         </tr>
                         {% endfor %}                        
                     </tbody>
@@ -205,23 +213,36 @@
 </div>
 
 <!-- Modal de Eliminación -->
-<div class="modal fade" id="deleteFacModal" tabindex="-1" role="dialog" aria-labelledby="deleteFacModalLabel" aria-hidden="true">
+<div class="modal fade" id="deleteFacModal" tabindex="-1" role="dialog" 
+     aria-labelledby="deleteFacModalLabel" aria-hidden="true" 
+     data-backdrop="true" data-keyboard="true">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="deleteFacModalLabel">Confirmar Eliminación</h5>
+                <h5 class="modal-title" id="deleteFacModalLabel">
+                    <i class="fas fa-exclamation-triangle text-danger"></i>
+                    Confirmar Eliminación
+                </h5>
                 <button class="close" type="button" data-dismiss="modal" aria-label="Cerrar">
-                    <span aria-hidden="true">×</span>
+                    <span aria-hidden="true">&times;</span>
                 </button>
             </div>
             <div class="modal-body">
-                <p>¿Está seguro que desea eliminar el código FAC <strong id="deleteCode"></strong>?</p>
-                <p class="text-danger">Esta acción no se puede deshacer y eliminará el código de CUCM en la próxima sincronización.</p>
+                <div class="alert alert-warning">
+                    <i class="fas fa-warning"></i>
+                    <strong>¡Atención!</strong> Esta acción no se puede deshacer.
+                </div>
+                <p>¿Está seguro que desea eliminar el código FAC <strong class="text-danger" id="deleteCode"></strong>?</p>
+                <p class="text-muted small">Esta acción eliminará el código tanto de la base de datos local como de CUCM en la próxima sincronización.</p>
                 <input type="hidden" id="deleteFacId">
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" type="button" data-dismiss="modal">Cancelar</button>
-                <button class="btn btn-danger" id="confirmDelete">Eliminar</button>
+                <button class="btn btn-secondary" type="button" data-dismiss="modal">
+                    <i class="fas fa-times"></i> Cancelar
+                </button>
+                <button class="btn btn-danger" id="confirmDelete">
+                    <i class="fas fa-trash"></i> Sí, Eliminar
+                </button>
             </div>
         </div>
     </div>
@@ -229,7 +250,7 @@
 
 <script>
 // Configuración global
-const API_URL = '/api/fac';
+const API_URL = '/api/fac/';
 
 // Función reutilizable para mostrar alertas
 function showAlert(type, message) {
@@ -242,13 +263,58 @@ function showAlert(type, message) {
         </div>
     `;
     $('#alertContainer').html(alertHTML);
-    setTimeout(() => $('.alert').alert('close'), 5000);
+    setTimeout(() => $('.alert').alert('close'), 7000);
+}
+
+// ✅ FUNCIÓN UNIVERSAL PARA CERRAR MODALES
+function closeModal(modalId) {
+    console.log('Cerrando modal:', modalId);
+    $(`#${modalId}`).modal('hide');
+    
+    // Fallback si Bootstrap falla
+    setTimeout(() => {
+        $(`#${modalId}`).removeClass('show').hide();
+        $('.modal-backdrop').remove();
+        $('body').removeClass('modal-open').css('padding-right', '');
+    }, 100);
 }
 
 $(document).ready(function() {
+    
+    // ✅ VERIFICAR BOOTSTRAP AL CARGAR
+    console.log('jQuery version:', $().jquery);
+    console.log('Bootstrap modal disponible:', typeof $.fn.modal !== 'undefined');
+    
     // Inicializar DataTable
     $('#facCodesTable').DataTable({
-        "order": [[1, "asc"]]
+        "order": [[1, "asc"]],
+        "language": {
+            "url": "/static/js/Spanish.json"
+        }
+    });
+
+    // ✅ EVENTS UNIVERSALES PARA CERRAR MODALES
+    $(document).on('click', '[data-dismiss="modal"]', function(e) {
+        e.preventDefault();
+        const modalId = $(this).closest('.modal').attr('id');
+        console.log('Cerrando modal via data-dismiss:', modalId);
+        closeModal(modalId);
+    });
+
+    // Cerrar modales con ESC
+    $(document).on('keydown', function(e) {
+        if (e.key === 'Escape') {
+            $('.modal.show').each(function() {
+                closeModal($(this).attr('id'));
+            });
+        }
+    });
+
+    // Cerrar modal haciendo clic en el backdrop
+    $('.modal').on('click', function(e) {
+        if (e.target === this) {
+            closeModal($(this).attr('id'));
+        }
     });
 
     // Crear nuevo código FAC
@@ -263,6 +329,9 @@ $(document).ready(function() {
             active: document.getElementById('active').value === 'true'
         };
 
+        const $submitBtn = $(this).find('button[type="submit"]');
+        const originalHtml = $submitBtn.html();
+        $submitBtn.html('<i class="fas fa-spinner fa-spin"></i> Creando...').prop('disabled', true);
 
         fetch('/api/fac', {
             method: 'POST',
@@ -279,29 +348,118 @@ $(document).ready(function() {
             return res.json();
         })
         .then(result => {
-            alert('Código creado correctamente:', result);
-            location.reload();
+            showAlert('success', 'Código creado exitosamente');
+            $('#createFacForm')[0].reset();
+            setTimeout(() => location.reload(), 2000);
         })
         .catch(err => {
-            alert('Error al crear código: ' + err.message);
+            showAlert('danger', 'Error al crear código: ' + err.message);
+        })
+        .finally(() => {
+            $submitBtn.html(originalHtml).prop('disabled', false);
         });
     });
 
-    // Abrir modal de edición
-    $(document).on('click', '.edit-fac', function() {
+    // Sincronización manual desde CUCM
+    $('#syncWithCucm, #firstTimeSync').on('click', function() {
+        if (!confirm('¿Desea sincronizar códigos FAC desde CUCM hacia la base de datos local?\n\nEsto importará códigos que estén en CUCM pero no en la BD local.')) return;
+
         const $btn = $(this);
+        const originalHtml = $btn.html();
+        $btn.html('<i class="fas fa-spinner fa-spin"></i> Sincronizando...').prop('disabled', true);
+
+        fetch('/api/fac/sync-from-cucm-manual', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(async res => {
+            if (!res.ok) {
+                const error = await res.json();
+                throw new Error(error.detail || 'Error en sincronización');
+            }
+            return res.json();
+        })
+        .then(result => {
+            if (result.success) {
+                showAlert('success', result.message);
+                setTimeout(() => location.reload(), 3000);
+            } else {
+                showAlert('warning', result.message);
+                $btn.html(originalHtml).prop('disabled', false);
+            }
+        })
+        .catch(err => {
+            showAlert('danger', 'Error al sincronizar desde CUCM: ' + err.message);
+            $btn.html(originalHtml).prop('disabled', false);
+        });
+    });
+
+    // Importar código individual desde CUCM
+    $(document).on('click', '.import-fac', function() {
+        const $btn = $(this);
+        const code = $btn.data('code');
+        const originalHtml = $btn.html();
+        
+        if (!confirm(`¿Desea importar el código ${code} desde CUCM a la base de datos local?`)) return;
+        
+        $btn.html('<i class="fas fa-spinner fa-spin"></i> Importando...').prop('disabled', true);
+
+        fetch('/api/fac/sync-from-cucm-manual', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(res => res.json())
+        .then(result => {
+            if (result.success) {
+                showAlert('success', `Código ${code} importado desde CUCM`);
+                setTimeout(() => location.reload(), 2000);
+            } else {
+                showAlert('warning', result.message);
+                $btn.html(originalHtml).prop('disabled', false);
+            }
+        })
+        .catch(err => {
+            showAlert('danger', 'Error al importar código desde CUCM');
+            $btn.html(originalHtml).prop('disabled', false);
+        });
+    });
+
+    // ✅ ABRIR MODAL DE EDICIÓN - CORREGIDO
+    $(document).on('click', '.edit-fac', function(e) {
+        e.preventDefault();
+        const $btn = $(this);
+        
+        console.log('Abriendo modal de edición...');
+        
+        // Limpiar modal
+        $('#editFacForm')[0].reset();
+        
+        // Establecer valores
         $('#editFacId').val($btn.data('id'));
         $('#editAuthCode').val($btn.data('code'));
         $('#editAuthCodeName').val($btn.data('name'));
         $('#editAuthLevel').val($btn.data('level'));
-        $('#editDescription').val($btn.data('desc'));
+        $('#editDescription').val($btn.data('desc') || '');
         $('#editActive').val($btn.data('active'));
+        
         $('#editFacModal').modal('show');
     });
 
-    // Guardar cambios de edición
-    $('#saveFacChanges').on('click', function() {
+    // ✅ GUARDAR CAMBIOS DE EDICIÓN - CORREGIDO
+    $('#saveFacChanges').on('click', function(e) {
+        e.preventDefault();
+        
         const id = $('#editFacId').val();
+        
+        if (!id) {
+            showAlert('danger', 'Error: ID no válido para edición');
+            return;
+        }
+        
         const data = {
             authorization_code_name: $('#editAuthCodeName').val(),
             authorization_level: parseInt($('#editAuthLevel').val()),
@@ -309,110 +467,118 @@ $(document).ready(function() {
             active: $('#editActive').val() === 'true'
         };
 
+        const $btn = $(this);
+        const originalHtml = $btn.html();
+        $btn.html('<i class="fas fa-spinner fa-spin"></i> Guardando...').prop('disabled', true);
+
         $.ajax({
             url: `${API_URL}${id}`,
             method: 'PUT',
             contentType: 'application/json',
             data: JSON.stringify(data),
-            success: () => {
-                $('#editFacModal').modal('hide');
+            success: function() {
+                closeModal('editFacModal');
                 showAlert('success', 'Código FAC actualizado exitosamente');
-                loadFacCodes();
+                setTimeout(() => location.reload(), 2000);
             },
             error: function(xhr) {
+                console.error('Error en edición:', xhr);
                 const error = xhr.responseJSON?.detail || 'Error al actualizar código FAC';
                 showAlert('danger', error);
+            },
+            complete: function() {
+                $btn.html(originalHtml).prop('disabled', false);
             }
         });
     });
 
-    // Abrir modal de eliminación
-    $(document).on('click', '.delete-fac', function() {
+    // ✅ ABRIR MODAL DE ELIMINACIÓN - CORREGIDO
+    $(document).on('click', '.delete-fac', function(e) {
+        e.preventDefault();
         const $btn = $(this);
-        $('#deleteFacId').val($btn.data('id'));
-        $('#deleteCode').text($btn.data('code'));
+        const facId = $btn.data('id');
+        const facCode = $btn.data('code');
+        
+        console.log('Abriendo modal de eliminación:', { facId, facCode });
+        
+        if (!facId) {
+            showAlert('danger', 'Error: No se pudo obtener el ID del código');
+            return;
+        }
+        
+        // Limpiar y establecer valores
+        $('#deleteFacId').val(facId);
+        $('#deleteCode').text(facCode);
+        
+        // Abrir modal
         $('#deleteFacModal').modal('show');
     });
 
-    // Confirmar eliminación
-    $('#confirmDelete').on('click', function() {
+    // ✅ CONFIRMAR ELIMINACIÓN - ERROR PRINCIPAL CORREGIDO
+    $('#confirmDelete').on('click', function(e) {
+        e.preventDefault();
+        
         const id = $('#deleteFacId').val();
+        const code = $('#deleteCode').text();
+        
+        console.log('Eliminando código:', { id, code });
+        
+        if (!id) {
+            showAlert('danger', 'Error: ID no válido para eliminación');
+            return;
+        }
+        
+        const $btn = $(this);
+        const originalHtml = $btn.html();
+        $btn.html('<i class="fas fa-spinner fa-spin"></i> Eliminando...').prop('disabled', true);
 
         $.ajax({
-            url: `${API_URL}${id}`,
+            url: `${API_URL}${id}`, // ✅ CORREGIDO: era 'fac_id', ahora es 'id'
             method: 'DELETE',
-            success: () => {
-                $('#deleteFacModal').modal('hide');
+            success: function(response) {
+                console.log('Eliminación exitosa:', response);
+                closeModal('deleteFacModal');
                 showAlert('success', 'Código FAC eliminado exitosamente');
-                loadFacCodes();
+                setTimeout(() => location.reload(), 2000);
             },
             error: function(xhr) {
+                console.error('Error en eliminación:', xhr);
                 const error = xhr.responseJSON?.detail || 'Error al eliminar código FAC';
                 showAlert('danger', error);
-            }
-        });
-    });
-
-    // Sincronizar con CUCM
-    $('#syncWithCucm').on('click', function() {
-        if (!confirm('¿Desea sincronizar todos los códigos FAC con CUCM? Esta operación puede tomar tiempo.')) return;
-
-        const $btn = $(this);
-        $btn.html('<i class="bi bi-arrow-repeat spin"></i> Sincronizando...').prop('disabled', true);
-
-        $.ajax({
-            url: `${API_URL}sync-with-cucm`,
-            method: 'POST',
-            success: () => {
-                showAlert('success', 'Sincronización iniciada correctamente. Puedes ver el progreso en el historial.');
-                setTimeout(() => window.location.href = '/dashboard/fac/historial', 2000);
             },
-            error: function(xhr) {
-                const error = xhr.responseJSON?.detail || 'Error al iniciar sincronización';
-                showAlert('danger', error);
-                $btn.html('<i class="bi bi-sync"></i> Sincronizar con CUCM').prop('disabled', false);
+            complete: function() {
+                $btn.html(originalHtml).prop('disabled', false);
             }
         });
     });
 
-    // Función para recargar tabla sin recargar página
-    function loadFacCodes() {
-        $.get(API_URL, function(data) {
-            const tbody = $('#facCodesTable tbody');
-            tbody.empty();
-            data.forEach(code => {
-                tbody.append(`
-                    <tr>
-                        <td>${code.id}</td>
-                        <td>${code.authorization_code}</td>
-                        <td>${code.authorization_code_name}</td>
-                        <td>${code.authorization_level}</td>
-                        <td>${code.description || ''}</td>
-                        <td><span class="badge badge-${code.active ? 'success' : 'danger'}">${code.active ? 'Activo' : 'Inactivo'}</span></td>
-                        <td><span class="badge badge-${code.cucm_synced ? 'success' : 'warning'}">${code.cucm_synced ? 'Sí' : 'No'}</span></td>
-                        <td>
-                            <button class="btn btn-sm btn-primary edit-fac"
-                                data-id="${code.id}"
-                                data-code="${code.authorization_code}"
-                                data-name="${code.authorization_code_name}"
-                                data-level="${code.authorization_level}"
-                                data-desc="${code.description || ''}"
-                                data-active="${code.active}">
-                                <i class="bi bi-pencil" aria-hidden="true"></i>
-                            </button>
-                            <button class="btn btn-sm btn-danger delete-fac"
-                                data-id="${code.id}"
-                                data-code="${code.authorization_code}">
-                                <i class="bi bi-trash" aria-hidden="true"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `);
-            });
-        }).fail(() => {
-            showAlert('danger', 'Error al cargar los códigos FAC desde el servidor.');
-        });
-    }
+    // ✅ LIMPIAR MODALES AL CERRAR
+    $('.modal').on('hidden.bs.modal', function () {
+        const modalId = $(this).attr('id');
+        console.log('Limpiando modal:', modalId);
+        
+        if (modalId === 'deleteFacModal') {
+            $('#deleteFacId').val('');
+            $('#deleteCode').text('');
+            $('#confirmDelete').html('<i class="fas fa-trash"></i> Sí, Eliminar').prop('disabled', false);
+        } else if (modalId === 'editFacModal') {
+            $('#editFacForm')[0].reset();
+            $('#saveFacChanges').html('Guardar Cambios').prop('disabled', false);
+        }
+    });
 });
+
+// ✅ FUNCIONES DE DEBUG (temporal - puedes remover después)
+function debugModal() {
+    console.log('=== DEBUG MODAL ===');
+    console.log('jQuery:', typeof $ !== 'undefined');
+    console.log('Bootstrap modal:', typeof $.fn.modal !== 'undefined');
+    console.log('Delete modal exists:', $('#deleteFacModal').length > 0);
+    console.log('Modal backdrop:', $('.modal-backdrop').length);
+    console.log('Body classes:', $('body').attr('class'));
+}
+
+// Ejecutar debug después de 2 segundos
+setTimeout(debugModal, 2000);
 </script>
 {% endblock %}

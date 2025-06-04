@@ -11,57 +11,360 @@
         <li class="breadcrumb-item active">Carga Masiva</li>
     </ol>
     <div class="card mb-4">
-        <div class="card-header">
+        <div class="card-header bg-primary text-white">
             <i class="fas fa-file-import me-1"></i>
             Carga Masiva de Anexos
         </div>
         <div class="card-body">
             {% if error %}
-            <div class="alert alert-danger">
-                <h5>Error al procesar el archivo:</h5>
+            <div class="alert alert-danger" role="alert">
+                <h4 class="alert-heading"><i class="fas fa-exclamation-triangle"></i> Error</h4>
                 <p>{{ error }}</p>
+                
                 {% if errores %}
-                <ul>
-                    {% for err in errores %}
-                    <li>{{ err }}</li>
-                    {% endfor %}
-                </ul>
+                <hr>
+                <p class="mb-2"><strong>Se encontraron los siguientes errores:</strong></p>
+                <div class="bg-light p-3 rounded">
+                    <ul class="mb-0">
+                        {% for err in errores %}
+                        <li>{{ err }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
                 {% endif %}
             </div>
             {% endif %}
             
-            <form action="/dashboard/anexos/carga_masiva" method="post" enctype="multipart/form-data">
-                <div class="mb-3">
-                    <label for="file" class="form-label">Archivo CSV</label>
-                    <input type="file" class="form-control" id="file" name="file" accept=".csv" required>
-                    <div class="form-text">El archivo debe ser CSV con las siguientes columnas: numero, usuario, area_nivel1. Opcionalmente: area_nivel2, area_nivel3, pin, saldo_actual</div>
-                </div>
+            <!-- Mensaje de éxito -->
+            {% if success %}
+            <div class="alert alert-success" role="alert">
+                <h4 class="alert-heading"><i class="fas fa-check-circle"></i> Éxito</h4>
+                <p>{{ success }}</p>
                 
-                <div class="alert alert-info">
-                    <h5>Formato esperado:</h5>
-                    <p>El archivo CSV debe tener los siguientes encabezados:</p>
-                    <ul>
-                        <li><strong>numero</strong>: Número de anexo (obligatorio)</li>
-                        <li><strong>usuario</strong>: Nombre del usuario (obligatorio)</li>
-                        <li><strong>area_nivel1</strong>: Área de nivel 1 (obligatorio)</li>
-                        <li><strong>area_nivel2</strong>: Área de nivel 2 (opcional)</li>
-                        <li><strong>area_nivel3</strong>: Área de nivel 3 (opcional)</li>
-                        <li><strong>pin</strong>: PIN personalizado (opcional, se generará automáticamente si no se proporciona)</li>
-                        <li><strong>saldo_actual</strong>: Saldo inicial (opcional, por defecto 0)</li>
+                {% if errores %}
+                <hr>
+                <p class="mb-2"><strong>Se encontraron los siguientes errores:</strong></p>
+                <div class="bg-light p-3 rounded">
+                    <ul class="mb-0">
+                        {% for error in errores %}
+                        <li>{{ error }}</li>
+                        {% endfor %}
                     </ul>
-                    <p>Ejemplo:</p>
-                    <pre>numero,usuario,area_nivel1,area_nivel2,area_nivel3,pin,saldo_actual
-1001,Juan Pérez,Gerencia,Finanzas,Contabilidad,123456,100
-1002,María López,Operaciones,Soporte,,987654,50
-1003,Carlos Gómez,Ventas,,,123789,</pre>
                 </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <!-- Instrucciones mejoradas -->
+            <div class="alert alert-info" role="alert">
+                <h4 class="alert-heading"><i class="fas fa-info-circle"></i> Instrucciones</h4>
+                <p>Suba un archivo <strong>CSV</strong> o <strong>Excel (XLS/XLSX)</strong> con el siguiente formato:</p>
                 
-                <div class="mb-3">
-                    <a href="/dashboard/anexos" class="btn btn-secondary me-2">Cancelar</a>
-                    <button type="submit" class="btn btn-primary">Cargar</button>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-table"></i> Columnas requeridas:</h6>
+                        <ul>
+                            <li><strong>numero</strong>: Número de anexo</li>
+                            <li><strong>usuario</strong>: Nombre del usuario</li>
+                            <li><strong>area_nivel1</strong>: Área principal</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-check"></i> Columnas opcionales:</h6>
+                        <ul>
+                            <li><strong>area_nivel2</strong>: Subárea</li>
+                            <li><strong>area_nivel3</strong>: División</li>
+                            <li><strong>pin</strong>: PIN personalizado</li>
+                            <li><strong>saldo_actual</strong>: Saldo inicial</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <h6 class="mt-3"><i class="fas fa-code"></i> Ejemplo de formato:</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <small class="text-muted">Formato CSV:</small>
+                        <pre class="bg-light p-2 rounded"><code>numero,usuario,area_nivel1,area_nivel2,area_nivel3,pin,saldo_actual
+1001,Juan Pérez,Gerencia,Finanzas,Contabilidad,123456,50.00
+1002,María López,Operaciones,Soporte,,987654,25.50
+1003,Carlos Gómez,Ventas,,,123789,10.00</code></pre>
+                    </div>
+                    <div class="col-md-6">
+                        <small class="text-muted">Formato Excel:</small>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>A</th>
+                                        <th>B</th>
+                                        <th>C</th>
+                                        <th>D</th>
+                                        <th>E</th>
+                                        <th>F</th>
+                                        <th>G</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>numero</td>
+                                        <td>usuario</td>
+                                        <td>area_nivel1</td>
+                                        <td>area_nivel2</td>
+                                        <td>area_nivel3</td>
+                                        <td>pin</td>
+                                        <td>saldo_actual</td>
+                                    </tr>
+                                    <tr>
+                                        <td>1001</td>
+                                        <td>Juan Pérez</td>
+                                        <td>Gerencia</td>
+                                        <td>Finanzas</td>
+                                        <td>Contabilidad</td>
+                                        <td>123456</td>
+                                        <td>50.00</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Formulario mejorado -->
+            <form action="/dashboard/anexos/carga_masiva" method="post" enctype="multipart/form-data" class="mt-4">
+                <div class="mb-4">
+                    <label for="file" class="form-label">
+                        <i class="fas fa-file-upload"></i> 
+                        Seleccionar archivo (CSV o Excel)
+                    </label>
+                    <input type="file" 
+                           class="form-control" 
+                           id="file" 
+                           name="file" 
+                           accept=".csv,.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" 
+                           required>
+                    <div class="form-text">
+                        <i class="fas fa-info-circle"></i> 
+                        Formatos permitidos: CSV, XLS, XLSX (Tamaño máximo: 10MB)
+                    </div>
+                </div>
+
+                <!-- Opciones adicionales -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-cog"></i> Opciones de procesamiento</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="generar_pin" name="generar_pin" checked>
+                                    <label class="form-check-label" for="generar_pin">
+                                        Generar PIN automáticamente si no se proporciona
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="continuar_errores" name="continuar_errores">
+                                    <label class="form-check-label" for="continuar_errores">
+                                        Continuar procesando aunque haya errores
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between">
+                    <a href="/dashboard/anexos" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left"></i> Volver a Anexos
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-upload"></i> Procesar Anexos
+                    </button>
                 </div>
             </form>
         </div>
     </div>
+
+    <!-- Sección de plantillas -->
+    <div class="card mt-4">
+        <div class="card-header bg-secondary text-white">
+            <h5 class="mb-0"><i class="fas fa-file-download"></i> Plantillas de descarga</h5>
+        </div>
+        <div class="card-body">
+            <p>Descargue las plantillas para carga masiva de anexos en el formato de su preferencia:</p>
+            
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-body text-center">
+                            <i class="fas fa-file-csv display-4 text-success"></i>
+                            <h6 class="card-title mt-2">Plantilla CSV</h6>
+                            <p class="card-text small">Formato de texto separado por comas</p>
+                            <button onclick="downloadTemplate('csv')" class="btn btn-success">
+                                <i class="fas fa-download"></i> Descargar CSV
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-body text-center">
+                            <i class="fas fa-file-excel display-4 text-primary"></i>
+                            <h6 class="card-title mt-2">Plantilla Excel</h6>
+                            <p class="card-text small">Formato de hoja de cálculo</p>
+                            <button onclick="downloadTemplate('excel')" class="btn btn-primary">
+                                <i class="fas fa-download"></i> Descargar Excel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Información adicional -->
+            <div class="alert alert-light mt-3" role="alert">
+                <h6><i class="fas fa-lightbulb"></i> Consejos:</h6>
+                <ul class="mb-0">
+                    <li>Use la primera fila como encabezados con los nombres exactos</li>
+                    <li>Si no proporciona un PIN, se generará automáticamente</li>
+                    <li>El saldo inicial es opcional (por defecto 0)</li>
+                    <li>Evite espacios en blanco al inicio o final de los valores</li>
+                </ul>
+            </div>
+        </div>
+    </div>
 </div>
-{% endblock %}    
+
+<!-- Script para descargar plantillas -->
+<script>
+// Datos de ejemplo para las plantillas
+const templateData = [
+    ['numero', 'usuario', 'area_nivel1', 'area_nivel2', 'area_nivel3', 'pin', 'saldo_actual'],
+    ['1001', 'Juan Pérez', 'Gerencia', 'Finanzas', 'Contabilidad', '123456', '50.00'],
+    ['1002', 'María López', 'Operaciones', 'Soporte', '', '', '25.50'],
+    ['1003', 'Carlos Gómez', 'Ventas', '', '', '', '10.00']
+];
+
+// Función para descargar plantillas
+function downloadTemplate(type) {
+    try {
+        if (type === 'csv') {
+            // Generar CSV
+            const csvContent = templateData.map(row => row.join(',')).join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            downloadFile(blob, 'anexos_template.csv');
+            showToast('Plantilla CSV descargada exitosamente', 'success');
+            
+        } else if (type === 'excel') {
+            // Si XLSX está disponible, generar Excel
+            if (typeof XLSX !== 'undefined') {
+                const workbook = XLSX.utils.book_new();
+                const worksheet = XLSX.utils.aoa_to_sheet(templateData);
+                
+                // Configurar ancho de columnas
+                worksheet['!cols'] = [
+                    { width: 10 },  // numero
+                    { width: 20 },  // usuario
+                    { width: 15 },  // area_nivel1
+                    { width: 15 },  // area_nivel2
+                    { width: 15 },  // area_nivel3
+                    { width: 10 },  // pin
+                    { width: 12 }   // saldo_actual
+                ];
+                
+                XLSX.utils.book_append_sheet(workbook, worksheet, 'Anexos');
+                XLSX.writeFile(workbook, 'anexos_template.xlsx');
+                showToast('Plantilla Excel descargada exitosamente', 'success');
+            } else {
+                // Alternativa: ofrecer CSV si no está disponible XLSX
+                alert('La generación de Excel no está disponible. Descargando CSV como alternativa.');
+                downloadTemplate('csv');
+            }
+        }
+    } catch (error) {
+        console.error('Error al generar plantilla:', error);
+        showToast('Error al generar la plantilla', 'danger');
+    }
+}
+
+// Función auxiliar para descargar archivos
+function downloadFile(blob, filename) {
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+}
+
+// Función para mostrar notificaciones
+function showToast(message, type) {
+    // Crear elemento de notificación
+    const toastElement = document.createElement('div');
+    toastElement.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+    toastElement.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    toastElement.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(toastElement);
+    
+    // Remover después de 3 segundos
+    setTimeout(() => {
+        if (toastElement.parentNode) {
+            toastElement.parentNode.removeChild(toastElement);
+        }
+    }, 3000);
+}
+
+// Validación del archivo seleccionado
+document.getElementById('file').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (file) {
+        const maxSize = 10 * 1024 * 1024; // 10MB
+        
+        if (file.size > maxSize) {
+            alert('El archivo es demasiado grande. Máximo permitido: 10MB');
+            e.target.value = '';
+            return;
+        }
+        
+        const fileExtension = file.name.split('.').pop().toLowerCase();
+        const validExtensions = ['csv', 'xls', 'xlsx'];
+        
+        if (!validExtensions.includes(fileExtension)) {
+            alert('Formato de archivo no válido. Use CSV, XLS o XLSX');
+            e.target.value = '';
+            return;
+        }
+        
+        // Mostrar información del archivo seleccionado
+        const fileInfo = document.createElement('div');
+        fileInfo.className = 'alert alert-info mt-2';
+        fileInfo.innerHTML = `
+            <i class="fas fa-file-check"></i> 
+            <strong>Archivo seleccionado:</strong> ${file.name} 
+            (${(file.size / 1024).toFixed(1)} KB)
+        `;
+        
+        // Remover info anterior si existe
+        const existingInfo = e.target.parentNode.querySelector('.alert-info');
+        if (existingInfo) {
+            existingInfo.remove();
+        }
+        
+        e.target.parentNode.appendChild(fileInfo);
+    }
+});
+</script>
+
+<!-- Cargar librería XLSX para generar plantillas Excel (si está disponible) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+{% endblock %}

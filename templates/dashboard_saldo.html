@@ -51,11 +51,12 @@
                 <form id="rechargeForm" class="row g-3">
                     <div class="col-md-12">
                         <label for="extension" class="form-label">Anexo</label>
-                        <input type="text" class="form-control" id="extension" required>
+                        <input type="text" class="form-control" id="extension" pattern="[0-9]+" title="Ingrese solo números para el anexo." required>
                     </div>
                     <div class="col-md-12">
                         <label for="amount" class="form-label">Monto ($)</label>
-                        <input type="number" class="form-control" id="amount" step="0.01" min="0.01" required>
+                        <!-- <input type="number" class="form-control" id="amount" step="0.01" min="0.01" required> -->
+                        <input type="number" class="form-control" id="amount" step="0.01" required>
                     </div>
                     <div class="col-12 text-end">
                         <button type="submit" class="btn btn-success">

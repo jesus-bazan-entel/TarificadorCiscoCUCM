@@ -35,8 +35,8 @@
                 <form method="post" action="/dashboard/cucm_config">
                     <div class="mb-3">
                         <label for="cucm_ip" class="form-label">Dirección IP del CUCM</label>
-                        <input type="text" class="form-control" id="cucm_ip" name="cucm_ip" value="{{ config.cucm_ip if config else '190.105.250.127' }}" required>
-                        <div class="form-text">Ej: 190.105.250.127</div>
+                        <input type="text" class="form-control" id="cucm_ip" name="cucm_ip" value="{{ config.cucm_ip if config else '10.224.0.10' }}" required>
+                        <div class="form-text">Ej: 10.224.0.10</div>
                     </div>
                     <div class="mb-3">
                         <label for="cucm_port" class="form-label">Puerto JTAPI</label>

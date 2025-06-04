@@ -11,6 +11,8 @@ import java.net.http.HttpResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -24,10 +26,19 @@ public class CallListener implements CallControlCallObserver {
     private static final HttpClient client = HttpClient.newHttpClient();
     private static final ObjectMapper objectMapper = new ObjectMapper()
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);    
-    //private static final ObjectMapper objectMapper = new ObjectMapper();
     
     // Almacenar información de las llamadas activas
     private static final Map<String, CallData> activeCalls = new ConcurrentHashMap<>();
+    
+    // ✅ NUEVOS MAPS PARA TRACKING DE DIRECCIONES
+    private static final Map<String, CallDirection> callDirections = new ConcurrentHashMap<>();
+    private static final Map<String, String> dialingConnections = new ConcurrentHashMap<>();
+    private static final Map<String, Set<String>> callConnections = new ConcurrentHashMap<>();
+    
+    // ✅ ENUM PARA DIRECCIONES
+    enum CallDirection {
+        INBOUND, OUTBOUND, UNKNOWN
+    }
     
     private static class CallData {
         String callId;
@@ -55,7 +66,6 @@ public class CallListener implements CallControlCallObserver {
             this.startTime = Instant.now();
             this.status = "initiated";
         }
-
     }
 
     @Override
@@ -146,78 +156,96 @@ public class CallListener implements CallControlCallObserver {
         
         return "CONN_" + conn.getState();
     }
-    
+
+    // ✅ CORREGIDO: handleConnCreated mejorado
     private void handleConnCreated(ConnCreatedEv ev, String callId) {
         try {
+            Connection conn = ev.getConnection();
+            String connectionAddress = conn.getAddress().getName();
+            
+            // Mantener registro de todas las conexiones
+            callConnections.computeIfAbsent(callId, k -> new HashSet<>()).add(connectionAddress);
+            Set<String> connections = callConnections.get(callId);
+            
             CallData existingCall = activeCalls.get(callId);
+            
             if (existingCall != null) {
-                Connection conn = ev.getConnection();
-                String newAddress = conn.getAddress().getName();
-                
-                if (!newAddress.equals(existingCall.callingNumber)) {
-                    existingCall.calledNumber = newAddress;
+                // Segunda conexión o más
+                if (!connectionAddress.equals(existingCall.callingNumber)) {
+                    existingCall.calledNumber = connectionAddress;
                     existingCall.hasDialedNumber = true;
-                    existingCall.direction = "outbound";
-                    System.out.println("  Actualizado número destino: " + newAddress);
-
-                    // Verificando si se tiene saldo disponible para el destino marcado
-                    if (!canMakeCall(existingCall.callingNumber, existingCall.calledNumber)) {
-                        System.out.println("*** SALDO INSUFICIENTE PARA DESTINO ***");
-                        System.out.println("  " + existingCall.callingNumber + " no puede llamar a " + existingCall.calledNumber);
-                        try {
-                            // Desconectar la llamada
-                            CallControlCall ccCall = (CallControlCall) ev.getCall();
-                            ccCall.drop();
-                            System.out.println("  Llamada terminada por saldo insuficiente");
-                        } catch (Exception e) {
-                            System.err.println("Error terminando llamada por saldo insuficiente: " + e.getMessage());
-                        }
-                        return;
+                    
+                    System.out.println("  Segunda conexión detectada: " + connectionAddress);
+                    
+                    // ✅ VERIFICAR SI YA TENEMOS DIRECCIÓN DETERMINADA POR DIALING
+                    CallDirection knownDirection = callDirections.get(callId);
+                    
+                    if (knownDirection == CallDirection.OUTBOUND) {
+                        System.out.println("  ✅ Llamada ya identificada como SALIENTE por evento DIALING");
+                        existingCall.direction = "outbound";
+                        // No cambiar la dirección, ya está correcta
+                    } else {
+                        System.out.println("  🔍 Esperando eventos ALERTING para determinar dirección...");
+                        existingCall.direction = "pending";
                     }
-
                 }
                 return;
             }
             
-            Connection conn = ev.getConnection();
-            Address address = conn.getAddress();
-            String addressName = address.getName();
-            
-            CallData callData = new CallData(callId, addressName, addressName);
+            // Primera conexión
+            CallData callData = new CallData(callId, connectionAddress, connectionAddress);
             activeCalls.put(callId, callData);
             
             System.out.println("  Llamada creada - ID: " + callId + 
-                             ", De: " + callData.callingNumber);
+                            ", Primera conexión: " + callData.callingNumber);
             
         } catch (Exception e) {
             System.err.println("Error en handleConnCreated: " + e.getMessage());
+            e.printStackTrace();
         }
     }
-    
-    private void handleCallCtlConnDialing(CallCtlConnDialingEv ev, String callId) {
-        CallData callData = activeCalls.get(callId);
-        if (callData != null) {
-            callData.dialingTime = Instant.now();
-            callData.status = "dialing";
-            System.out.println("  MARCANDO: " + callId);
 
-            if (!hasSufficientBalance(callData.callingNumber)) {
-                System.out.println("Saldo insuficiente para " + callData.callingNumber + ". Terminando llamada...");
-                try {
-                    CallControlCall ccCall = (CallControlCall) ev.getCall();
-                    ccCall.drop();
-                } catch (Exception e) {
-                    System.err.println("Error terminando llamada por saldo insuficiente: " + e.getMessage());
+    // ✅ CORREGIDO: handleCallCtlConnDialing mejorado
+    private void handleCallCtlConnDialing(CallCtlConnDialingEv ev, String callId) {
+        try {
+            Connection conn = ev.getConnection();
+            String connection = conn.getAddress().getName();
+            
+            System.out.println("  MARCANDO: " + callId);
+            System.out.println("  Conexión marcando: " + connection);
+            
+            // ✅ CLAVE: Marcar esta llamada como SALIENTE desde el evento DIALING
+            callDirections.put(callId, CallDirection.OUTBOUND);
+            dialingConnections.put(callId, connection);
+            
+            System.out.println("  📞 LLAMADA SALIENTE detectada por DIALING: " + callId);
+            
+            CallData callData = activeCalls.get(callId);
+            if (callData != null) {
+                callData.dialingTime = Instant.now();
+                callData.status = "dialing";
+                callData.direction = "outbound"; // ✅ Marcar como saliente
+                
+                // ✅ Solo verificar saldo para llamadas SALIENTES
+                if (!hasSufficientBalance(callData.callingNumber)) {
+                    System.out.println("Saldo insuficiente para " + callData.callingNumber + ". Terminando llamada...");
+                    try {
+                        CallControlCall ccCall = (CallControlCall) ev.getCall();
+                        ccCall.drop();
+                    } catch (Exception e) {
+                        System.err.println("Error terminando llamada por saldo insuficiente: " + e.getMessage());
+                    }
+                    return;
                 }
-                return;
-            }            
+            }
+        } catch (Exception e) {
+            System.err.println("Error en handleCallCtlConnDialing: " + e.getMessage());
         }
     }
-    
+
     private void handleCallCtlConnDisconnected(CallCtlConnDisconnectedEv ev, String callId) {
         CallData callData = activeCalls.get(callId);
         if (callData != null) {
-            //callData.networkReachedTime = Instant.now();
             System.out.println("  Desconexión: " + Instant.now());
         }
     }
@@ -233,7 +261,6 @@ public class CallListener implements CallControlCallObserver {
     private void handleCallCtlConnNetworkAlerting(CallCtlConnNetworkAlertingEv ev, String callId) {
         CallData callData = activeCalls.get(callId);
         if (callData != null) {
-            // Este evento indica que está timbrando en el destino
             callData.networkAlertingTime = Instant.now();
             callData.status = "ringing";
             System.out.println("  TIMBRANDO EN DESTINO: " + callId);
@@ -246,7 +273,8 @@ public class CallListener implements CallControlCallObserver {
             System.out.println("  TERMINAL RINGING: " + callId);
         }
     }
-    
+
+    // ✅ CORREGIDO: handleCallCtlConnEstablished mejorado
     private void handleCallCtlConnEstablished(CallCtlConnEstablishedEv ev, String callId) {
         CallData callData = activeCalls.get(callId);
         if (callData != null) {
@@ -254,53 +282,92 @@ public class CallListener implements CallControlCallObserver {
                 Connection conn = ev.getConnection();
                 String address = conn.getAddress().getName();
                 
-                // Si el evento es para el destino y no el origen
-                if (!address.equals(callData.callingNumber) && address.equals(callData.calledNumber)) {
-                    callData.destinationEstablishedTime = Instant.now();
-                    callData.status = "established";
-                    System.out.println("  *** DESTINO CONTESTÓ (ESTABLISHED) ***: " + callId + 
-                                     " en " + callData.destinationEstablishedTime);
-
-                    // *** REPORTAR LLAMADA ACTIVA AL SISTEMA ***
-                    reportActiveCall(callData);
-
-                    // Versión más explícita de la asignación
-                    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-                    ScheduledFuture<?> task = scheduler.scheduleAtFixedRate(() -> {
-                        reportActiveCall(callData);
-                    }, 10, 5, TimeUnit.SECONDS);
-                    
-                    // Asignación explícita
-                    callData.reporterTask = task;
-                    
-                    // Programar reportes periódicos para actualizar duración/costo en tiempo real
-                    if (callData.reporterTask != null) {
-                        System.out.println("Reporting task scheduled successfully for call: " + callId);
+                System.out.println("  ESTABLISHED detectado en: " + address);
+                
+                // ✅ NUEVA LÓGICA: Solo marcar como contestado si es el DESTINO quien establece
+                boolean isDestinationAnswering = false;
+                
+                // Para llamadas entrantes: el destino es la extensión interna
+                if ("inbound".equals(callData.direction) || "pending".equals(callData.direction)) {
+                    if (isInternalExtension(address)) {
+                        isDestinationAnswering = true;
+                        System.out.println("  ✅ DESTINO INTERNO CONTESTÓ: " + address);
                     }
-                                                        
-                } else {
-                    System.out.println("  CONEXIÓN ESTABLECIDA (origen): " + callId);
                 }
+                // Para llamadas salientes: el destino es el número externo
+                else if ("outbound".equals(callData.direction)) {
+                    if (!isInternalExtension(address) && address.equals(callData.calledNumber)) {
+                        isDestinationAnswering = true;
+                        System.out.println("  ✅ DESTINO EXTERNO CONTESTÓ: " + address);
+                    }
+                }
+                
+                // ✅ SOLO establecer destinationEstablishedTime si realmente es el destino contestando
+                if (isDestinationAnswering && callData.destinationEstablishedTime == null) {
+                    callData.destinationEstablishedTime = Instant.now();
+                    callData.status = "answered";  // ✅ Cambiar estado a "answered"
+                    System.out.println("  *** DESTINO CONTESTÓ (ESTABLISHED) ***: " + callId + 
+                                    " en " + callData.destinationEstablishedTime);
+                } else {
+                    // ✅ Si no es el destino, solo es establecimiento de origen/red
+                    System.out.println("  CONEXIÓN ORIGEN/RED ESTABLECIDA: " + address + " (no es respuesta del destino)");
+                    
+                    // Si aún no tenemos estado de respuesta, mantener como "ringing" o "alerting"
+                    if (callData.destinationEstablishedTime == null) {
+                        callData.status = "ringing";
+                    }
+                }
+                
+                // ✅ PROGRAMAR REPORTES PERIÓDICOS PARA TODAS LAS LLAMADAS (contestadas o no)
+                if (callData.reporterTask == null || callData.reporterTask.isCancelled()) {
+                    schedulePeriodicReporting(callId, callData);
+                }
+                
             } catch (Exception e) {
                 System.err.println("Error en handleCallCtlConnEstablished: " + e.getMessage());
             }
         }
     }
-    
+
+    // ✅ NUEVO: Método para programar reportes periódicos
+    private void schedulePeriodicReporting(String callId, CallData callData) {
+        // ✅ SOLO crear reporterTask si no existe uno ya
+        if (callData.reporterTask == null || callData.reporterTask.isCancelled()) {
+            ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+            ScheduledFuture<?> task = scheduler.scheduleAtFixedRate(() -> {
+                try {
+                    // ✅ Verificar que la llamada aún existe
+                    if (activeCalls.containsKey(callId)) {
+                        // ✅ Aplicar último fallback si aún no hay dirección
+                        if ("pending".equals(callData.direction) || "unknown".equals(callData.direction)) {
+                            applyDirectionFallback(callData);
+                        }
+                        
+                        reportActiveCall(callData);
+                    } else {
+                        // Si la llamada ya no existe, cancelar el task
+                        Thread.currentThread().interrupt();
+                        scheduler.shutdown();
+                    }
+                } catch (Exception e) {
+                    System.err.println("Error en reporte periódico para llamada " + callId + ": " + e.getMessage());
+                }
+            }, 2, 5, TimeUnit.SECONDS); // ✅ Delay inicial de 2 segundos
+            
+            callData.reporterTask = task;
+            System.out.println("✅ Reporting task scheduled successfully for call: " + callId);
+        }
+    }
+
     private void handleCallCtlTermConnTalking(CallCtlTermConnTalkingEv ev, String callId) {
         CallData callData = activeCalls.get(callId);
         if (callData != null) {
             try {
-                // Verificar si es el evento talking del destino, no del origen
                 TerminalConnection termConn = ev.getTerminalConnection();
                 String terminalName = termConn.getTerminal().getName();
                 
                 System.out.println("  TALKING detectado en terminal: " + terminalName);
-                
-                // Solo registrar si es diferente del origen
-                if (!terminalName.equals(callData.callingNumber)) {
-                    System.out.println("  *** DESTINO TALKING ***: " + callId);
-                }
+                System.out.println("  *** DESTINO TALKING ***: " + callId);
             } catch (Exception e) {
                 System.err.println("Error en handleCallCtlTermConnTalking: " + e.getMessage());
             }
@@ -314,81 +381,256 @@ public class CallListener implements CallControlCallObserver {
             System.out.println("  Llamada en progreso: " + callId);
         }
     }
-    
+
+    // ✅ CORREGIDO: handleConnAlerting mejorado
     private void handleConnAlerting(ConnAlertingEv ev, String callId) {
         CallData callData = activeCalls.get(callId);
         if (callData != null) {
             callData.status = "alerting";
+            
+            try {
+                Connection conn = ev.getConnection();
+                String alertingAddress = conn.getAddress().getName();
+                
+                System.out.println("  🔔 ALERTING detectado en: " + alertingAddress);
+                
+                // ✅ Si aún no se ha determinado dirección, usar ALERTING para determinarla
+                if ("pending".equals(callData.direction) && callData.hasDialedNumber) {
+                    determineDirectionFromAlerting(callData, alertingAddress);
+                }
+                
+            } catch (Exception e) {
+                System.err.println("Error determinando dirección en ALERTING: " + e.getMessage());
+            }
+            
             System.out.println("  Alerting: " + callId);
         }
     }
-    
+
+    // ✅ NUEVO: Método para determinar dirección desde ALERTING
+    private void determineDirectionFromAlerting(CallData callData, String alertingAddress) {
+        String firstAddress = callData.callingNumber;
+        String secondAddress = callData.calledNumber;
+        
+        // El que está en ALERTING es quien RECIBE la llamada
+        if (alertingAddress.equals(firstAddress)) {
+            // Primer número está en alerting = está recibiendo
+            // Segundo → Primero (típicamente INBOUND)
+            if (isInternalExtension(firstAddress) && !isInternalExtension(secondAddress)) {
+                callData.callingNumber = secondAddress;  // Externo origina
+                callData.calledNumber = firstAddress;    // Interno recibe
+                callData.direction = "inbound";
+                System.out.println("  📱 LLAMADA ENTRANTE CONFIRMADA: " + secondAddress + " → " + firstAddress);
+            } else {
+                callData.direction = determineDirectionByNumbers(secondAddress, firstAddress);
+                System.out.println("  📞 Dirección determinada: " + callData.direction);
+            }
+            
+        } else if (alertingAddress.equals(secondAddress)) {
+            // Segundo número está en alerting = está recibiendo
+            // Primero → Segundo (típicamente OUTBOUND)
+            callData.direction = determineDirectionByNumbers(firstAddress, secondAddress);
+            System.out.println("  📞 LLAMADA CONFIRMADA: " + firstAddress + " → " + secondAddress + " [" + callData.direction + "]");
+        }
+        
+        // Verificar saldo solo para llamadas SALIENTES
+        if ("outbound".equals(callData.direction)) {
+            if (!canMakeCall(callData.callingNumber, callData.calledNumber)) {
+                System.out.println("*** SALDO INSUFICIENTE PARA DESTINO ***");
+                return;
+            }
+        }
+    }
+
+    // ✅ CORREGIDO: handleConnConnected mejorado
     private void handleConnConnected(ConnConnectedEv ev, String callId) {
         CallData callData = activeCalls.get(callId);
         if (callData != null) {
             try {
                 String addressName = ev.getConnection().getAddress().getName();
+                Set<String> connections = callConnections.get(callId);
+                CallDirection direction = callDirections.get(callId);
+                
                 if (!addressName.equals(callData.callingNumber)) {
                     callData.calledNumber = addressName;
                     callData.hasDialedNumber = true;
                 }
+                
+                // ✅ NUEVA LÓGICA: Usar información de dirección ya determinada
+                if (connections != null && connections.size() >= 2 && direction != null) {
+                    
+                    String callingNumber, calledNumber;
+                    
+                    if (direction == CallDirection.OUTBOUND) {
+                        // Para llamadas salientes: el que marcó es calling, el destino es called
+                        String originator = dialingConnections.get(callId);
+                        String destination = connections.stream()
+                            .filter(conn -> !conn.equals(originator))
+                            .findFirst()
+                            .orElse("unknown");
+                        
+                        callingNumber = originator;
+                        calledNumber = destination;
+                        
+                        System.out.println("  📞 LLAMADA SALIENTE: " + callingNumber + " → " + calledNumber);
+                        
+                    } else if (direction == CallDirection.INBOUND) {
+                        // Para llamadas entrantes: el externo es calling, el local es called
+                        String localExtension = findLocalExtension(connections);
+                        String externalNumber = connections.stream()
+                            .filter(conn -> !conn.equals(localExtension))
+                            .findFirst()
+                            .orElse("unknown");
+                        
+                        callingNumber = externalNumber;
+                        calledNumber = localExtension;
+                        
+                        System.out.println("  📱 LLAMADA ENTRANTE: " + callingNumber + " → " + calledNumber);
+                        
+                    } else {
+                        // Fallback para direcciones unknown
+                        System.out.println("  🔄 FALLBACK en ConnConnected: Determinando dirección...");
+                        
+                        String localExt = findLocalExtension(connections);
+                        String otherNumber = connections.stream()
+                            .filter(conn -> !conn.equals(localExt))
+                            .findFirst()
+                            .orElse("unknown");
+                        
+                        // Si no hay evidencia de DIALING, asumir entrante
+                        direction = CallDirection.INBOUND;
+                        callDirections.put(callId, direction);
+                        
+                        callingNumber = otherNumber;
+                        calledNumber = localExt;
+                        
+                        System.out.println("  📱 LLAMADA ENTRANTE (ConnConnected FALLBACK): " + callingNumber + " → " + calledNumber);
+                    }
+                    
+                    // Actualizar información de la llamada
+                    callData.callingNumber = callingNumber;
+                    callData.calledNumber = calledNumber;
+                    callData.direction = direction.toString().toLowerCase();
+                }
+                
             } catch (Exception e) {
-                // Ignorar errores
+                System.err.println("Error en handleConnConnected: " + e.getMessage());
             }
             
             System.out.println("  Llamada conectada - ID: " + callId + 
-                             ", De: " + callData.callingNumber + 
-                             ", A: " + callData.calledNumber);
+                            ", De: " + callData.callingNumber + 
+                            ", A: " + callData.calledNumber + 
+                            ", Dirección: " + callData.direction);
         }
     }
-    
+
+    // ✅ NUEVO: Método auxiliar para encontrar extensión local
+    private String findLocalExtension(Set<String> connections) {
+        return connections.stream()
+            .filter(this::isInternalExtension)
+            .findFirst()
+            .orElse(connections.iterator().next());
+    }
+
+    // ✅ NUEVO: Método para aplicar fallback de dirección
+    private void applyDirectionFallback(CallData callData) {
+        if ("pending".equals(callData.direction) || "unknown".equals(callData.direction)) {
+            System.out.println("⚠️  Aplicando último fallback para dirección...");
+            
+            if (isInternalExtension(callData.callingNumber) && !isInternalExtension(callData.calledNumber)) {
+                // Intercambiar para llamada entrante
+                String temp = callData.callingNumber;
+                callData.callingNumber = callData.calledNumber;
+                callData.calledNumber = temp;
+                callData.direction = "inbound";
+            } else {
+                callData.direction = determineDirectionByNumbers(callData.callingNumber, callData.calledNumber);
+            }
+            
+            System.out.println("  📞 Dirección final: " + callData.direction);
+        }
+    }
+
+    private String determineDirectionByNumbers(String callingNumber, String calledNumber) {
+        boolean callingIsInternal = isInternalExtension(callingNumber);
+        boolean calledIsInternal = isInternalExtension(calledNumber);
+        
+        if (callingIsInternal && !calledIsInternal) {
+            return "outbound";  // Interno → Externo
+        } else if (!callingIsInternal && calledIsInternal) {
+            return "inbound";   // Externo → Interno
+        } else if (callingIsInternal && calledIsInternal) {
+            return "internal";  // Interno → Interno
+        } else {
+            return "transit";   // Externo → Externo
+        }
+    }
+
+    private boolean isInternalExtension(String number) {
+        if (number == null || number.trim().isEmpty()) {
+            return false;
+        }
+        
+        String cleanNumber = number.replaceAll("[^0-9]", "");
+        
+        if (cleanNumber.length() == 4 && cleanNumber.matches("^[3-5].*")) {
+            return true;
+        }
+        
+        try {
+            int num = Integer.parseInt(cleanNumber);
+            return num >= 3000 && num <= 5999;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     private void handleConnDisconnected(ConnDisconnectedEv ev, String callId) {
         CallData callData = activeCalls.get(callId);
         if (callData != null) {
             callData.endTime = Instant.now();
-            callData.status = "disconnected";
             
-            // Obtener causa de desconexión si es posible
+            // ✅ DETERMINAR ESTADO FINAL CORRECTO
+            if (callData.destinationEstablishedTime == null) {
+                // No fue contestada
+                if ("ringing".equals(callData.status) || "alerting".equals(callData.status)) {
+                    callData.status = "no_answer";
+                    System.out.println("  ❌ LLAMADA NO CONTESTADA - ID: " + callId);
+                } else {
+                    callData.status = "failed";
+                    System.out.println("  ❌ LLAMADA FALLÓ - ID: " + callId);
+                }
+            } else {
+                // Fue contestada y luego desconectada
+                callData.status = "completed";
+                System.out.println("  ✅ LLAMADA COMPLETADA - ID: " + callId);
+            }
+            
             if (ev instanceof CallCtlConnDisconnectedEv) {
                 CallCtlConnDisconnectedEv ctlEv = (CallCtlConnDisconnectedEv) ev;
                 callData.releaseCause = ctlEv.getCallControlCause();
             }
             
-            System.out.println("  Llamada desconectada - ID: " + callId);
+            System.out.println("  Llamada desconectada - ID: " + callId + " Estado final: " + callData.status);
 
-            if (callData.reporterTask != null) {
-                callData.reporterTask.cancel(false);
-                System.out.println("  Tarea de reporte periódico cancelada para llamada: " + callId);
+            // ✅ Cancelar task y limpiar recursos
+            if (callData.reporterTask != null && !callData.reporterTask.isCancelled()) {
+                boolean cancelled = callData.reporterTask.cancel(true);
+                System.out.println("  Tarea de reporte periódico cancelada para llamada: " + callId + " (success: " + cancelled + ")");
             }
+
+            // ✅ Limpiar maps de tracking
+            callDirections.remove(callId);
+            dialingConnections.remove(callId);
+            callConnections.remove(callId);
+
+            // ✅ Remover de activeCalls para evitar reportes adicionales
+            activeCalls.remove(callId);
 
             // Mostrar resumen de tiempos
-            System.out.println("\n=== RESUMEN DE TIEMPOS ===");
-            System.out.println("  Start: " + callData.startTime);
-            System.out.println("  Dialing: " + callData.dialingTime);
-            System.out.println("  Network Reached: " + callData.networkReachedTime);
-            System.out.println("  Network Alerting (Ringing): " + callData.networkAlertingTime);
-            System.out.println("  Destination Established (Answered): " + callData.destinationEstablishedTime);
-            System.out.println("  End: " + callData.endTime);
+            printCallSummary(callData);
             
-            // Calcular duraciones
-            if (callData.destinationEstablishedTime != null && callData.endTime != null) {
-                long billableDuration = callData.endTime.getEpochSecond() - 
-                                      callData.destinationEstablishedTime.getEpochSecond();
-                System.out.println("  DURACIÓN FACTURABLE (desde established): " + billableDuration + " segundos");
-            }
-            
-            if (callData.networkAlertingTime != null && callData.destinationEstablishedTime != null) {
-                long ringDuration = callData.destinationEstablishedTime.getEpochSecond() - 
-                                   callData.networkAlertingTime.getEpochSecond();
-                System.out.println("  Tiempo de timbre: " + ringDuration + " segundos");
-            }
-            System.out.println("========================\n");
-            
-            boolean shouldSendCDR = false;
-            
-            if (callData.hasDialedNumber || !callData.callingNumber.equals(callData.calledNumber)) {
-                shouldSendCDR = true;
-            }
+            boolean shouldSendCDR = callData.hasDialedNumber || !callData.callingNumber.equals(callData.calledNumber);
             
             if (callData.callingNumber.equals(callData.calledNumber) && !callData.hasDialedNumber) {
                 System.out.println("Ignorando llamada: solo se levantó y colgó el auricular");
@@ -399,32 +641,46 @@ public class CallListener implements CallControlCallObserver {
                 sendCDR(callData);
             }
 
-            // GUARDAR EL CALLID ANTES DE ENVIARLO
-            String idToDelete = callData.callId; // Usar el ID guardado en el objeto CallData
-
             // Reportar eliminación de llamada activa
-            try {
-                // Asegurarse de usar el mismo ID que se usó al registrar la llamada
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create("http://localhost:8000/api/active-calls/" + callId))
-                        .DELETE()
-                        .build();
-                
-                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                    System.out.println("Llamada activa eliminada del monitoreo: " + callId);
-                } else {
-                    System.err.println("Error eliminando llamada activa: " + response.statusCode() + " - " + response.body());
-                }
-            } catch (Exception e) {
-                System.err.println("Error reportando fin de llamada: " + e.getMessage());
-            }
-
-            activeCalls.remove(callId);
-
+            reportCallEnd(callId);
         }
     }
-    
+
+    private void printCallSummary(CallData callData) {
+        System.out.println("\n=== RESUMEN DE TIEMPOS ===");
+        System.out.println("  Start: " + callData.startTime);
+        System.out.println("  Dialing: " + callData.dialingTime);
+        System.out.println("  Network Reached: " + callData.networkReachedTime);
+        System.out.println("  Network Alerting (Ringing): " + callData.networkAlertingTime);
+        System.out.println("  Destination Established (Answered): " + callData.destinationEstablishedTime);
+        System.out.println("  End: " + callData.endTime);
+        
+        if (callData.destinationEstablishedTime != null && callData.endTime != null) {
+            long billableDuration = callData.endTime.getEpochSecond() - 
+                                callData.destinationEstablishedTime.getEpochSecond();
+            System.out.println("  DURACIÓN FACTURABLE (desde established): " + billableDuration + " segundos");
+        }
+        System.out.println("========================\n");
+    }
+
+    private void reportCallEnd(String callId) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:8000/api/active-calls/" + callId))
+                    .DELETE()
+                    .build();
+            
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                System.out.println("Llamada activa eliminada del monitoreo: " + callId);
+            } else {
+                System.err.println("Error eliminando llamada activa: " + response.statusCode() + " - " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("Error reportando fin de llamada: " + e.getMessage());
+        }
+    }
+
     private void handleConnFailed(ConnFailedEv ev, String callId) {
         CallData callData = activeCalls.get(callId);
         if (callData != null) {
@@ -443,6 +699,11 @@ public class CallListener implements CallControlCallObserver {
                 System.out.println("  Tarea de reporte periódico cancelada para llamada fallida: " + callId);
             }
 
+            // Limpiar maps de tracking
+            callDirections.remove(callId);
+            dialingConnections.remove(callId);
+            callConnections.remove(callId);
+
             if (callData.hasDialedNumber || !callData.callingNumber.equals(callData.calledNumber)) {
                 sendCDR(callData);
             }
@@ -452,11 +713,27 @@ public class CallListener implements CallControlCallObserver {
     }
     
     private void handleCallInvalid(CallInvalidEv ev, String callId) {
+        // Limpiar todos los datos de la llamada
         activeCalls.remove(callId);
+        callDirections.remove(callId);
+        dialingConnections.remove(callId);
+        callConnections.remove(callId);
     }
     
     private void sendCDR(CallData callData) {
         try {
+            System.out.println("\n=== ENVIANDO CDR ===");
+            System.out.println("  📞 Llamada: " + callData.callingNumber + " → " + callData.calledNumber);
+            System.out.println("  📍 Dirección: " + callData.direction);
+            System.out.println("  ⏱️  Duración total: " + 
+                (callData.endTime.getEpochSecond() - callData.startTime.getEpochSecond()) + " segundos");
+            
+            if (callData.destinationEstablishedTime != null) {
+                long billable = callData.endTime.getEpochSecond() - callData.destinationEstablishedTime.getEpochSecond();
+                System.out.println("  💰 Duración facturable: " + billable + " segundos");
+            }
+            System.out.println("====================");
+            
             Map<String, Object> cdr = new HashMap<>();
             cdr.put("calling_number", callData.callingNumber);
             cdr.put("called_number", callData.calledNumber);
@@ -480,16 +757,16 @@ public class CallListener implements CallControlCallObserver {
             }
             cdr.put("duration_seconds", durationTotal);
             
-            // Calcular duración facturable (desde que el destino contestó)
+            // Calcular duración facturable
             long durationBillable = 0;
             if (callData.destinationEstablishedTime != null && callData.endTime != null) {
                 durationBillable = callData.endTime.getEpochSecond() - 
-                                  callData.destinationEstablishedTime.getEpochSecond();
+                                callData.destinationEstablishedTime.getEpochSecond();
             }
             cdr.put("duration_billable", durationBillable);
             
             String json = objectMapper.writeValueAsString(cdr);
-            System.out.println("Enviando CDR: " + json);
+            System.out.println("JSON CDR: " + json);
             
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create("http://localhost:8000/cdr"))
@@ -500,12 +777,16 @@ public class CallListener implements CallControlCallObserver {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             System.out.println("CDR enviado. Respuesta: " + response.statusCode());
             
+            if (response.statusCode() >= 400) {
+                System.err.println("Error en respuesta CDR: " + response.body());
+            }
+            
         } catch (Exception e) {
             System.err.println("Error enviando CDR: " + e.getMessage());
             e.printStackTrace();
         }
     }
-    
+
     private boolean hasSufficientBalance(String callingNumber) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
@@ -527,14 +808,12 @@ public class CallListener implements CallControlCallObserver {
         public String reason;
         public double balance;
         public String zona;
-        public double tarifa_segundo;  // Cambio: tarifa por segundo, no por minuto
+        public double tarifa_segundo;
         public int tiempo_disponible_segundos;
         
-        // Constructor vacío necesario para Jackson
         public BalanceCheckResponse() {}
     }
 
-    // Modificar el método canMakeCall():
     private boolean canMakeCall(String callingNumber, String calledNumber) {
         try {
             String url = String.format("http://localhost:8000/check_balance_for_call/%s/%s", 
@@ -547,10 +826,8 @@ public class CallListener implements CallControlCallObserver {
                     .build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             
-            // *** CAMBIO: Deserializar a clase específica ***
             BalanceCheckResponse result = objectMapper.readValue(response.body(), BalanceCheckResponse.class);
             
-            // Log detallado basado en segundos
             if (!result.can_call) {
                 System.out.printf("  ❌ NO PUEDE LLAMAR - Saldo: $%.5f, Zona: %s, Tarifa/seg: $%.5f, Razón: %s%n",
                     result.balance,
@@ -559,7 +836,6 @@ public class CallListener implements CallControlCallObserver {
                     result.reason != null ? result.reason : "Unknown"
                 );
             } else {
-                // Convertir segundos a minutos:segundos para mostrar más claro
                 int minutos = result.tiempo_disponible_segundos / 60;
                 int segundos = result.tiempo_disponible_segundos % 60;
                 System.out.printf("  ✅ PUEDE LLAMAR - Saldo: $%.5f, Zona: %s, Tarifa/seg: $%.5f, Tiempo disponible: %d:%02d%n",
@@ -577,64 +853,68 @@ public class CallListener implements CallControlCallObserver {
         }
     }
 
-
-    // En CallListener.java - añadir método para reportar llamadas activas
+    // ✅ CORREGIDO: reportActiveCall mejorado
     private void reportActiveCall(CallData callData) {
         try {
+            if (!activeCalls.containsKey(callData.callId)) {
+                System.out.println("⚠️  Llamada " + callData.callId + " ya no existe, cancelando reporte");
+                return;
+            }
+
+            if ("disconnected".equals(callData.status) || callData.endTime != null) {
+                System.out.println("⚠️  Llamada " + callData.callId + " ya terminó, cancelando reporte");
+                return;
+            }
+
             Map<String, Object> activeCall = new HashMap<>();
-            activeCall.put("call_id", callData.callId);  // CAMBIAR: callId -> call_id
-            activeCall.put("calling_number", callData.callingNumber);  // CAMBIAR: origin -> calling_number
-            activeCall.put("called_number", callData.calledNumber);  // CAMBIAR: destination -> called_number
+            activeCall.put("call_id", callData.callId);
+            activeCall.put("calling_number", callData.callingNumber);
+            activeCall.put("called_number", callData.calledNumber);
+            activeCall.put("direction", callData.direction);
             activeCall.put("start_time", callData.startTime.toString());
 
-            // Calcular duración en tiempo real
-            //long durationSeconds = Instant.now().getEpochSecond() - 
-            //                    (callData.destinationEstablishedTime != null ? 
-            //                    callData.destinationEstablishedTime.getEpochSecond() : 
-            //                    callData.startTime.getEpochSecond());
-            //activeCall.put("duration", durationSeconds);
             long durationSeconds = 0;
             if (callData.destinationEstablishedTime != null) {
                 durationSeconds = Instant.now().getEpochSecond() - 
                                 callData.destinationEstablishedTime.getEpochSecond();
             }
-            activeCall.put("current_duration", durationSeconds);  // CAMBIAR: duration -> current_duration
+            activeCall.put("current_duration", durationSeconds);
 
-            // Usar cache para evitar consultas repetidas para la misma zona/destino
             double tarifaSegundo = 0.0;
             String zona = "Desconocida";
             
-            // Obtener tarifa del API
-            try {
-                String url = String.format("http://localhost:8000/check_balance_for_call/%s/%s", 
-                                        callData.callingNumber, callData.calledNumber);
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(url))
-                        .timeout(Duration.ofSeconds(2))
-                        .GET()
-                        .build();
-                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                BalanceCheckResponse result = objectMapper.readValue(response.body(), BalanceCheckResponse.class);
-                
-                tarifaSegundo = result.tarifa_segundo;
-                zona = result.zona;
-            } catch (Exception e) {
-                System.err.println("Error obteniendo tarifa: " + e.getMessage());
+            if ("outbound".equals(callData.direction)) {
+                try {
+                    String url = String.format("http://localhost:8000/check_balance_for_call/%s/%s", 
+                                            callData.callingNumber, callData.calledNumber);
+                    HttpRequest request = HttpRequest.newBuilder()
+                            .uri(URI.create(url))
+                            .timeout(Duration.ofSeconds(2))
+                            .GET()
+                            .build();
+                    HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                    BalanceCheckResponse result = objectMapper.readValue(response.body(), BalanceCheckResponse.class);
+                    
+                    tarifaSegundo = result.tarifa_segundo;
+                    zona = result.zona;
+                } catch (Exception e) {
+                    System.err.println("Error obteniendo tarifa: " + e.getMessage());
+                }
+            } else {
+                zona = "Entrante";
             }
             
             double costoEstimado = durationSeconds * tarifaSegundo;
-            activeCall.put("current_cost", costoEstimado);  // CAMBIAR: estimatedCost -> current_cost
+            activeCall.put("current_cost", costoEstimado);
             activeCall.put("zone", zona);
-            
-            // Agregar connectionId para poder terminar la llamada
             activeCall.put("connection_id", callData.callId);
             
             System.out.println("Enviando reporte de llamada activa: " + callData.callingNumber + 
                             " -> " + callData.calledNumber + 
-                            " (dur: " + durationSeconds + "s, costo: $" + 
+                            " (" + callData.direction + ") " +
+                            "(dur: " + durationSeconds + "s, costo: $" + 
                             String.format("%.2f", costoEstimado) + ")");
             
-            // Enviar al servidor
             String json = objectMapper.writeValueAsString(activeCall);
             HttpRequest reportRequest = HttpRequest.newBuilder()
                     .uri(URI.create("http://localhost:8000/api/active-calls"))
@@ -655,31 +935,8 @@ public class CallListener implements CallControlCallObserver {
         }
     }
 
-    // Método auxiliar para obtener saldo
-    private double obtenerSaldoActual(String anexo) {
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://localhost:8000/check_balance/" + anexo))
-                    .timeout(Duration.ofSeconds(2))
-                    .GET()
-                    .build();
-                    
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            Map<String, Object> result = objectMapper.readValue(response.body(), Map.class);
-            
-            if (result.containsKey("balance")) {
-                return (Double) result.get("balance");
-            }
-        } catch (Exception e) {
-            System.err.println("Error obteniendo saldo: " + e.getMessage());
-        }
-        
-        return 0.0; // Valor predeterminado si hay error
-    }
-
     // Caches para evitar llamadas HTTP repetidas
     private static final Map<String, Double> tarifaCache = new ConcurrentHashMap<>();
     private static final Map<String, String> zonaCache = new ConcurrentHashMap<>();
     private static final Map<String, Long> tarifaCacheTime = new ConcurrentHashMap<>();
-
 }

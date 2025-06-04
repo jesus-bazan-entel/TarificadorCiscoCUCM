@@ -1,0 +1,510 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Anexos y Pines FAC{% endblock %}
+{% block header %}Gestión de Anexos y Pines FAC{% endblock %}
+
+{% block header_buttons %}
+<div class="btn-group">
+    <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addFacModal">
+        <i class="bi bi-plus-circle"></i> Agregar Asociación
+    </button>
+    <a href="/export/fac-pins/excel" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-file-excel"></i> Exportar Excel
+    </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- ✅ ESTADÍSTICAS RÁPIDAS -->
+<div class="row mb-4">
+    <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+        <div class="card bg-primary text-white h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-telephone-fill" style="font-size: 2rem;"></i>
+                <h4 class="mt-2">{{ stats.total_extensions if stats else 0 }}</h4>
+                <small>Total Anexos</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+        <div class="card bg-success text-white h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-shield-check" style="font-size: 2rem;"></i>
+                <h4 class="mt-2">{{ stats.active_pins if stats else 0 }}</h4>
+                <small>Pines Activos</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+        <div class="card bg-warning text-dark h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i>
+                <h4 class="mt-2">{{ stats.unassigned_extensions if stats else 0 }}</h4>
+                <small>Sin PIN Asignado</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-sm-6 mb-3">
+        <div class="card bg-info text-white h-100">
+            <div class="card-body text-center">
+                <i class="bi bi-clock" style="font-size: 2rem;"></i>
+                <h4 class="mt-2">{{ stats.last_updated_days if stats else 0 }}</h4>
+                <small>Días Últ. Act.</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ✅ FILTROS DE BÚSQUEDA -->
+<div class="card mb-4">
+    <div class="card-header bg-secondary text-white">
+        <h5 class="mb-0"><i class="bi bi-funnel"></i> Filtros de Búsqueda</h5>
+    </div>
+    <div class="card-body">
+        <form method="get" action="/dashboard/fac-pins" class="row g-3">
+            <div class="col-md-3">
+                <label for="extension" class="form-label">📞 Anexo</label>
+                <input type="text" class="form-control" id="extension" name="extension" 
+                       value="{{ request.query_params.get('extension', '') }}" placeholder="Ej: 4001">
+            </div>
+            <div class="col-md-3">
+                <label for="fac_pin" class="form-label">🔐 PIN FAC</label>
+                <input type="text" class="form-control" id="fac_pin" name="fac_pin" 
+                       value="{{ request.query_params.get('fac_pin', '') }}" placeholder="Ej: 1234">
+            </div>
+            <div class="col-md-2">
+                <label for="status" class="form-label">📊 Estado</label>
+                <select class="form-control" id="status" name="status">
+                    <option value="">Todos</option>
+                    <option value="active" {{ 'selected' if request.query_params.get('status') == 'active' else '' }}>✅ Activo</option>
+                    <option value="inactive" {{ 'selected' if request.query_params.get('status') == 'inactive' else '' }}>❌ Inactivo</option>
+                    <option value="unassigned" {{ 'selected' if request.query_params.get('status') == 'unassigned' else '' }}>⚠️ Sin PIN</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="department" class="form-label">🏢 Departamento</label>
+                <select class="form-control" id="department" name="department">
+                    <option value="">Todos</option>
+                    <option value="ventas" {{ 'selected' if request.query_params.get('department') == 'ventas' else '' }}>Ventas</option>
+                    <option value="administracion" {{ 'selected' if request.query_params.get('department') == 'administracion' else '' }}>Administración</option>
+                    <option value="soporte" {{ 'selected' if request.query_params.get('department') == 'soporte' else '' }}>Soporte</option>
+                    <option value="gerencia" {{ 'selected' if request.query_params.get('department') == 'gerencia' else '' }}>Gerencia</option>
+                </select>
+            </div>
+            
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-search"></i> Buscar
+                </button>
+                <a href="/dashboard/fac-pins" class="btn btn-secondary">
+                    <i class="bi bi-x-circle"></i> Limpiar
+                </a>
+                
+                <!-- Filtros rápidos -->
+                <div class="btn-group ms-3">
+                    <a href="?status=active" class="btn btn-outline-success btn-sm">✅ Activos</a>
+                    <a href="?status=unassigned" class="btn btn-outline-warning btn-sm">⚠️ Sin PIN</a>
+                    <a href="?status=inactive" class="btn btn-outline-danger btn-sm">❌ Inactivos</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ✅ TABLA DE ASOCIACIONES -->
+<div class="card">
+    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-table"></i> Asociaciones Anexo - PIN FAC</h5>
+        <small class="text-white-50">
+            {% if rows %}
+                Mostrando {{ rows|length }} registros
+                {% if total_records %}
+                    de {{ total_records }} total
+                {% endif %}
+            {% endif %}
+        </small>
+    </div>
+    <div class="card-body p-0">
+        {% if rows %}
+        <!-- ✅ TABLA ACTUALIZADA PARA MOSTRAR CÓDIGOS FAC -->
+        <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>📞 Anexo</th>
+                        <th>👤 Usuario</th>
+                        <th>🔐 Código FAC</th>
+                        <th>🏢 Departamento</th>
+                        <th>📊 Estado</th>
+                        <th>📅 Creado</th>
+                        <th>📅 Actualizado</th>
+                        <th>⚙️ Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td><strong>{{ row.extension }}</strong></td>
+                        <td>
+                            {% if row.user_name %}
+                                <strong>{{ row.user_name }}</strong>
+                                {% if row.user_email %}
+                                    <br><small class="text-muted">{{ row.user_email }}</small>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">Sin asignar</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <!-- ✅ MOSTRAR CÓDIGO FAC CON INFORMACIÓN COMPLETA -->
+                            {% if row.authorization_code %}
+                                <span class="badge bg-dark font-monospace">{{ row.authorization_code }}</span>
+                                <br><small class="text-muted">{{ row.authorization_code_name }}</small>
+                            {% else %}
+                                <span class="badge bg-warning text-dark">Sin código</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if row.department %}
+                                <span class="badge bg-secondary">{{ row.department|title }}</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if row.status == 'active' %}
+                                <span class="badge bg-success">✅ Activo</span>
+                            {% elif row.status == 'inactive' %}
+                                <span class="badge bg-danger">❌ Inactivo</span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark">⚠️ Sin definir</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <small class="text-muted">
+                                {{ row.created_at.strftime('%Y-%m-%d %H:%M') if row.created_at else '-' }}
+                            </small>
+                        </td>
+                        <td>
+                            <small class="text-muted">
+                                {{ row.updated_at.strftime('%Y-%m-%d %H:%M') if row.updated_at else '-' }}
+                            </small>
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-primary" 
+                                        onclick="editAssociation({{ row.id }}, '{{ row.extension }}', {{ row.fac_code_id }}, '{{ row.user_name or '' }}', '{{ row.department or '' }}', '{{ row.status }}')"
+                                        data-bs-toggle="modal" data-bs-target="#editFacModal">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-danger" 
+                                        onclick="deleteAssociation({{ row.id }}, '{{ row.extension }}')"
+                                        data-bs-toggle="modal" data-bs-target="#deleteFacModal">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+            <i class="bi bi-search" style="font-size: 3rem; color: #6c757d;"></i>
+            <h5 class="mt-3 text-muted">No se encontraron asociaciones</h5>
+            <p class="text-muted">
+                {% if request.query_params.items() %}
+                    Intenta modificar los filtros o <a href="/dashboard/fac-pins">limpiar todos los filtros</a>
+                {% else %}
+                    <button type="button" class="btn btn-primary mt-2" data-bs-toggle="modal" data-bs-target="#addFacModal">
+                        <i class="bi bi-plus-circle"></i> Crear primera asociación
+                    </button>
+                {% endif %}
+            </p>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Paginación -->
+    {% if rows and total_pages > 1 %}
+    <div class="card-footer">
+        <nav>
+            <ul class="pagination justify-content-center mb-0">
+                {% if page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ request.url.include_query_params(page=page-1) }}">Anterior</a>
+                </li>
+                {% endif %}
+                
+                <li class="page-item active">
+                    <a class="page-link" href="#">{{ page }} de {{ total_pages }}</a>
+                </li>
+                
+                {% if page < total_pages %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ request.url.include_query_params(page=page+1) }}">Siguiente</a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ✅ MODAL AGREGAR ASOCIACIÓN - VERSIÓN CORREGIDA -->
+<div class="modal fade" id="addFacModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Agregar Asociación Anexo - Código FAC</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="/api/fac-pins" method="POST">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="add_extension" class="form-label">📞 Anexo *</label>
+                        <input type="text" class="form-control" id="add_extension" name="extension" required 
+                               placeholder="Ej: 4001" pattern="[0-9]{4,5}">
+                        <div class="form-text">Número de extensión (4-5 dígitos)</div>
+                    </div>
+                    
+                    <!-- ✅ DROPDOWN PARA CÓDIGOS FAC ACTIVOS -->
+                    <div class="mb-3">
+                        <label for="add_fac_code_id" class="form-label">🔐 Código FAC *</label>
+                        <select class="form-control" id="add_fac_code_id" name="fac_code_id" required>
+                            <option value="">Seleccionar código FAC...</option>
+                            {% for fac_code in active_fac_codes %}
+                            <option value="{{ fac_code.id }}">
+                                {{ fac_code.authorization_code }} - {{ fac_code.authorization_code_name }}
+                                {% if fac_code.authorization_level %}
+                                    (Nivel: {{ fac_code.authorization_level }})
+                                {% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Códigos sincronizados desde CUCM - Solo activos disponibles</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="add_user_name" class="form-label">👤 Nombre del Usuario</label>
+                        <input type="text" class="form-control" id="add_user_name" name="user_name" 
+                               placeholder="Ej: Juan Pérez">
+                    </div>
+                    <div class="mb-3">
+                        <label for="add_user_email" class="form-label">📧 Email del Usuario</label>
+                        <input type="email" class="form-control" id="add_user_email" name="user_email" 
+                               placeholder="Ej: juan.perez@empresa.com">
+                    </div>
+                    <div class="mb-3">
+                        <label for="add_department" class="form-label">🏢 Departamento</label>
+                        <select class="form-control" id="add_department" name="department">
+                            <option value="">Seleccionar...</option>
+                            <option value="ventas">Ventas</option>
+                            <option value="administracion">Administración</option>
+                            <option value="soporte">Soporte</option>
+                            <option value="gerencia">Gerencia</option>
+                            <option value="contabilidad">Contabilidad</option>
+                            <option value="recursos_humanos">Recursos Humanos</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="add_status" class="form-label">📊 Estado *</label>
+                        <select class="form-control" id="add_status" name="status" required>
+                            <option value="active" selected>✅ Activo</option>
+                            <option value="inactive">❌ Inactivo</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="add_notes" class="form-label">📝 Notas</label>
+                        <textarea class="form-control" id="add_notes" name="notes" rows="2" 
+                                  placeholder="Observaciones adicionales..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle"></i> Guardar Asociación
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- ✅ MODAL EDITAR ASOCIACIÓN - VERSIÓN CORREGIDA -->
+<div class="modal fade" id="editFacModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> Editar Asociación</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="/api/fac-pins/update" method="POST" id="editForm">
+                <input type="hidden" id="edit_id" name="id">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="edit_extension" class="form-label">📞 Anexo *</label>
+                        <input type="text" class="form-control" id="edit_extension" name="extension" required>
+                    </div>
+                    
+                    <!-- ✅ DROPDOWN PARA CÓDIGOS FAC EN EDICIÓN -->
+                    <div class="mb-3">
+                        <label for="edit_fac_code_id" class="form-label">🔐 Código FAC *</label>
+                        <select class="form-control" id="edit_fac_code_id" name="fac_code_id" required>
+                            <option value="">Seleccionar código FAC...</option>
+                            {% for fac_code in active_fac_codes %}
+                            <option value="{{ fac_code.id }}">
+                                {{ fac_code.authorization_code }} - {{ fac_code.authorization_code_name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="edit_user_name" class="form-label">👤 Nombre del Usuario</label>
+                        <input type="text" class="form-control" id="edit_user_name" name="user_name">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_department" class="form-label">🏢 Departamento</label>
+                        <select class="form-control" id="edit_department" name="department">
+                            <option value="">Seleccionar...</option>
+                            <option value="ventas">Ventas</option>
+                            <option value="administracion">Administración</option>
+                            <option value="soporte">Soporte</option>
+                            <option value="gerencia">Gerencia</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_status" class="form-label">📊 Estado *</label>
+                        <select class="form-control" id="edit_status" name="status" required>
+                            <option value="active">✅ Activo</option>
+                            <option value="inactive">❌ Inactivo</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-warning">
+                        <i class="bi bi-check-circle"></i> Actualizar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- ✅ MODAL ELIMINAR ASOCIACIÓN -->
+<div class="modal fade" id="deleteFacModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-trash"></i> Eliminar Asociación</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>¿Estás seguro?</strong>
+                </div>
+                <p>Estás a punto de eliminar la asociación del anexo <strong id="delete_extension"></strong>.</p>
+                <p class="text-muted">Esta acción no se puede deshacer.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <form action="/api/fac-pins/delete" method="POST" style="display: inline;">
+                    <input type="hidden" id="delete_id" name="id">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-trash"></i> Eliminar
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    // ✅ FUNCIÓN PARA EDITAR ASOCIACIÓN (CORREGIDA)
+    function editAssociation(id, extension, facCodeId, userName, department, status) {
+        document.getElementById('edit_id').value = id;
+        document.getElementById('edit_extension').value = extension;
+        document.getElementById('edit_fac_code_id').value = facCodeId;
+        document.getElementById('edit_user_name').value = userName;
+        document.getElementById('edit_department').value = department;
+        document.getElementById('edit_status').value = status;
+    }
+
+    // ✅ MEJORAR LA VISUALIZACIÓN DE CÓDIGOS FAC
+    document.addEventListener('DOMContentLoaded', function() {
+        // Hacer los selects más informativos
+        const selects = document.querySelectorAll('select[name="fac_code_id"]');
+        selects.forEach(select => {
+            select.addEventListener('change', function() {
+                const selectedOption = this.options[this.selectedIndex];
+                if (selectedOption.value) {
+                    console.log('Código FAC seleccionado:', selectedOption.text);
+                }
+            });
+        });
+    });
+
+
+    // ✅ FUNCIÓN PARA ELIMINAR ASOCIACIÓN
+    function deleteAssociation(id, extension) {
+        document.getElementById('delete_id').value = id;
+        document.getElementById('delete_extension').textContent = extension;
+    }
+
+    // ✅ VALIDACIÓN DE FORMULARIO
+    document.addEventListener('DOMContentLoaded', function() {
+        // Validar que el anexo sea único al agregar
+        const addExtensionInput = document.getElementById('add_extension');
+        const editExtensionInput = document.getElementById('edit_extension');
+        
+        function validateExtension(input) {
+            input.addEventListener('blur', function() {
+                const extension = this.value;
+                if (extension.length >= 4) {
+                    // Aquí podrías hacer una llamada AJAX para verificar si el anexo ya existe
+                    console.log('Validando anexo:', extension);
+                }
+            });
+        }
+        
+        if (addExtensionInput) validateExtension(addExtensionInput);
+        if (editExtensionInput) validateExtension(editExtensionInput);
+
+        // Auto-refresh cada 60 segundos
+        setInterval(function() {
+            if (window.location.search === '' || window.location.search === '?') {
+                window.location.reload();
+            }
+        }, 60000);
+    });
+
+    // ✅ BUSCAR EN TIEMPO REAL
+    function setupRealTimeSearch() {
+        const searchInputs = ['extension', 'fac_pin'];
+        searchInputs.forEach(inputId => {
+            const input = document.getElementById(inputId);
+            if (input) {
+                let timeout;
+                input.addEventListener('input', function() {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => {
+                        if (this.value.length >= 3 || this.value.length === 0) {
+                            // Auto-submit form después de 500ms de inactividad
+                            const form = this.closest('form');
+                            if (form) form.submit();
+                        }
+                    }, 500);
+                });
+            }
+        });
+    }
+
+    setupRealTimeSearch();
+</script>
+{% endblock %}

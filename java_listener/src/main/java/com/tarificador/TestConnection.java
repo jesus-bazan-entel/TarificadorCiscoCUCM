@@ -9,7 +9,7 @@ import java.util.Properties;
 
 public class TestConnection {
     private static final String CONFIG_FILE = "/opt/tarificador/config/jtapi.properties";
-    private static final String DEFAULT_CUCM_IP = "190.105.250.127";
+    private static final String DEFAULT_CUCM_IP = "10.224.0.10";
     private static final String DEFAULT_JTAPI_USER = "jtapiuser";
     private static final String DEFAULT_JTAPI_PASSWORD = "fr4v4t3l";
     private static final String DEFAULT_APP_INFO = "TestApp";
@@ -49,7 +49,9 @@ public class TestConnection {
                                             cucmIp, jtapiUser, jtapiPassword, appInfo);
             }
 
+            System.out.println("Provider string: " + providerString);
             System.out.println("Intentando conexión con: " + providerString.replace(jtapiPassword, "********"));
+            System.out.println("Provider string: " + providerString);
 
             JtapiPeer peer = JtapiPeerFactory.getJtapiPeer(null);
             Provider provider = peer.getProvider(providerString);

@@ -4,7 +4,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi_login import LoginManager
 from fastapi.staticfiles import StaticFiles
 from passlib.context import CryptContext
-from sqlalchemy import create_engine, Column, Integer, String, Numeric, DateTime, text, Boolean, ForeignKey, and_
+from sqlalchemy import create_engine, Column, Integer, String, Numeric, DateTime, text, Boolean, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime, timedelta
 from collections import Counter
@@ -16,15 +16,6 @@ from typing import Optional, List, Dict, Union, Any
 from pydantic import BaseModel, validator, Field, ValidationError
 from decimal import Decimal
 from fastapi import WebSocket, WebSocketDisconnect
-import logging
-
-# Configurar logging al inicio del archivo
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
 
 # Custom Jinja2 filters
 def lt_filter(value, threshold):
@@ -1337,97 +1328,14 @@ async def dashboard_saldo(request: Request, user=Depends(authenticated_user)):
         "background_colors": background_colors
     })
 
-def process_cdr_status(status, duration_seconds, duration_billable):
-    """
-    Procesa el estado de la llamada basándose en el campo status de la BD
-    PRIORIDAD: Campo 'status' > Duración > Otros factores
-    """
-    
-    # ✅ PRIORIDAD 1: Usar el campo 'status' directamente
-    if status == 'no_answer':
-        return "📵 No contestada"
-    elif status == 'failed':
-        return "❌ Fallida"
-    elif status == 'answered' or status == 'completed':
-        return "✅ Completada"
-    elif status == 'ringing' or status == 'alerting':
-        return "🔔 Timbrando"
-    elif status == 'dialing':
-        return "📞 Marcando"
-    elif status == 'in_progress':
-        return "🔄 En progreso"
-    
-    # ✅ PRIORIDAD 2: Si status es 'disconnected', usar duración
-    elif status == 'disconnected':
-        if duration_billable and duration_billable > 0:
-            return "✅ Completada"
-        else:
-            return "📵 No contestada"
-    
-    # ✅ PRIORIDAD 3: Fallback para estados desconocidos
-    else:
-        if duration_billable and duration_billable > 0:
-            return f"✅ Completada ({status})"
-        else:
-            return f"❓ {status.title() if status else 'Desconocido'}"
-
-
-
+# DASHBOARD: CDR - CORREGIDO para incluir todos los tipos de llamadas
 # DASHBOARD: CDR - SINTAXIS SQLALCHEMY CORRECTA
-def get_filtered_cdr_data(request: Request):
-    """
-    Función centralizada para obtener datos filtrados
-    Compatible con SQLAlchemy
-    """
-    phone_number = request.query_params.get('phone_number', '').strip()
-    start_date = request.query_params.get('start_date', '').strip()
-    end_date = request.query_params.get('end_date', '').strip()
-    status_filter = request.query_params.get('status', '').strip()
-    direction_filter = request.query_params.get('direction', '').strip()
-    
-    db = SessionLocal()
-    # Construir query
-    params = []
-    query = """
-        SELECT calling_number, called_number, call_date, call_time, 
-               duration, cost, hangup_cause, status, direction, cdr_id
-        FROM call_logs 
-        WHERE 1=1
-    """
-    
-    if phone_number:
-        query += " AND (calling_number LIKE ? OR called_number LIKE ?)"
-        search_pattern = f"%{phone_number}%"
-        params.extend([search_pattern, search_pattern])
-    
-    if start_date:
-        query += " AND DATE(call_date) >= ?"
-        params.append(start_date)
-    
-    if end_date:
-        query += " AND DATE(call_date) <= ?"
-        params.append(end_date)
-    
-    if status_filter:
-        query += " AND status = ?"
-        params.append(status_filter)
-    
-    if direction_filter:
-        query += " AND direction = ?"
-        params.append(direction_filter)
-    
-    query += " ORDER BY call_date DESC, call_time DESC"
-    
-    # ✅ USAR text() para SQLAlchemy
-    result = db.execute(text(query), params)
-    return result.fetchall()
-
 @app.get("/dashboard/cdr")
 def dashboard_cdr(request: Request, 
                   user=Depends(authenticated_user),
                   page: int = Query(1, ge=1),
                   per_page: int = Query(10, ge=1, le=100),
-                  phone_number: str = Query(None),
+                  calling_number: str = Query(None),
                   start_date: str = Query(None),
                   end_date: str = Query(None),
                   min_duration: int = Query(0),
@@ -1458,13 +1366,10 @@ def dashboard_cdr(request: Request,
     params = {}
     
     # ✅ Aplicar filtros con sintaxis :parameter
-    #if phone_number:
-    #    query += " AND calling_number = :calling_number"
-    #    params['calling_number'] = calling_number
-    if phone_number:
-        query += " AND (calling_number LIKE :phone_pattern OR called_number LIKE :phone_pattern)"
-        params['phone_pattern'] = f"%{phone_number}%"
-
+    if calling_number:
+        query += " AND calling_number = :calling_number"
+        params['calling_number'] = calling_number
+    
     if start_date:
         query += " AND start_time >= :start_date"
         params['start_date'] = f"{start_date} 00:00:00"
@@ -1500,18 +1405,6 @@ def dashboard_cdr(request: Request,
         processed_rows = []
         for row in rows:
             # Determinar tipo de llamada para mostrar
-            duration_seconds = row[4]
-            duration_billable = row[9] if len(row) > 9 else 0
-            call_type = process_cdr_status(status, duration_seconds, duration_billable)
-            status = row[7]
-            if status == 'no_answer':
-                call_type = "📵 No contestada"
-            elif status == 'disconnected':
-                call_type = "✅ Contestada"
-            else:
-                call_type = "🔄 En progreso"
-                
-            """
             call_type = "📞 Completada"
             status_value = row[7] if len(row) > 7 else 'unknown'
             duration_value = row[4] if len(row) > 4 else 0
@@ -1524,8 +1417,7 @@ def dashboard_cdr(request: Request,
                 call_type = "✅ Completada"
             elif status_value == 'initiated':
                 call_type = "🔄 En progreso"
-            """
-
+            
             # Formatear dirección
             direction_value = row[8] if len(row) > 8 else 'unknown'
             direction_display = {
@@ -1564,13 +1456,10 @@ def dashboard_cdr(request: Request,
         # ✅ Consulta de conteo con sintaxis corregida
         count_query = "SELECT COUNT(*) FROM cdr WHERE 1=1"
         count_params = {}
-
-        if phone_number:
-            count_query += " AND (calling_number LIKE :phone_pattern OR called_number LIKE :phone_pattern)"
-            count_params['phone_pattern'] = f"%{phone_number}%"
-        #if calling_number:
-        #    count_query += " AND calling_number = :calling_number"
-        #    count_params['calling_number'] = calling_number
+        
+        if calling_number:
+            count_query += " AND calling_number = :calling_number"
+            count_params['calling_number'] = calling_number
         
         if start_date:
             count_query += " AND start_time >= :start_date"
@@ -1649,7 +1538,7 @@ def dashboard_cdr(request: Request,
         },
         "user": user,
         "current_filters": {
-            "phone_number": phone_number,
+            "calling_number": calling_number,
             "start_date": start_date,
             "end_date": end_date,
             "min_duration": min_duration,
@@ -3347,13 +3236,9 @@ def export_cdr_pdf(
     start_date: str = Query(None),
     end_date: str = Query(None),
     calling_number: str = Query(None),
-    called_number: str = Query(None),
-    # ✅ AGREGAR NUEVOS PARÁMETROS
-    phone_number: str = Query(None),
-    status: str = Query(None),
-    direction: str = Query(None)
+    called_number: str = Query(None)
 ):
-    """Exporta los registros CDR a un archivo PDF con todos los filtros del dashboard."""
+    """Exporta los registros CDR a un archivo PDF."""
     from sqlalchemy import text
     from datetime import datetime
     from jinja2 import Template
@@ -3363,7 +3248,7 @@ def export_cdr_pdf(
     db = SessionLocal()
     
     try:
-        # ✅ CONSULTA BASE ADAPTADA A TU ESQUEMA
+        # Construir la consulta base
         query = """
             SELECT c.calling_number, c.called_number, 
                    c.start_time, c.end_time, c.duration_seconds, 
@@ -3376,21 +3261,15 @@ def export_cdr_pdf(
         
         params = {}
         
-        # ✅ FILTRO DE NÚMERO MEJORADO (busca en origen Y destino)
-        if phone_number:
-            query += " AND (c.calling_number LIKE :phone_pattern OR c.called_number LIKE :phone_pattern)"
-            params["phone_pattern"] = f"%{phone_number}%"
-        
-        # ✅ MANTENER COMPATIBILIDAD CON FILTROS EXISTENTES
-        if calling_number and not phone_number:  # Solo si no se usa phone_number
+        # Agregar filtros si se proporcionan
+        if calling_number:
             query += " AND c.calling_number = :calling_number"
             params["calling_number"] = calling_number
         
-        if called_number and not phone_number:  # Solo si no se usa phone_number
+        if called_number:
             query += " AND c.called_number = :called_number"
             params["called_number"] = called_number
         
-        # ✅ FILTROS DE FECHA (mantener igual)
         if start_date:
             query += " AND c.start_time >= :start_date"
             params["start_date"] = f"{start_date} 00:00:00"
@@ -3399,90 +3278,44 @@ def export_cdr_pdf(
             query += " AND c.end_time <= :end_date"
             params["end_date"] = f"{end_date} 23:59:59"
         
-        # ✅ NUEVO: FILTRO DE ESTADO
-        if status:
-            query += " AND c.status = :status"
-            params["status"] = status
-        
-        # ✅ NUEVO: FILTRO DE DIRECCIÓN  
-        if direction:
-            query += " AND c.direction = :direction"
-            params["direction"] = direction
-        
         # Ordenar por fecha descendente
         query += " ORDER BY c.start_time DESC LIMIT 1000"
         
-        print(f"🔍 Query PDF: {query}")
-        print(f"🔍 Params PDF: {params}")
-        
-        # Ejecutar la consulta
+        # Ejecutar la consulta usando text()
         rows = db.execute(text(query), params).fetchall()
         
-        print(f"📊 Registros encontrados para PDF: {len(rows)}")
-        
-        # ✅ HTML TEMPLATE MEJORADO CON INFO DE FILTROS
+        # Crear el HTML para el reporte
         html_template = """
         <html>
         <head>
             <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 10px; }
-                th { background-color: #f2f2f2; font-weight: bold; }
+                body { font-family: Arial, sans-serif; }
+                table { width: 100%; border-collapse: collapse; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
                 .header { text-align: center; margin-bottom: 20px; }
-                .filters { background-color: #f9f9f9; padding: 10px; margin-bottom: 20px; border-radius: 5px; }
-                .footer { text-align: center; margin-top: 20px; font-size: 0.8em; color: #666; }
-                h1 { color: #333; margin-bottom: 10px; }
-                .filter-item { display: inline-block; margin-right: 15px; font-size: 0.9em; }
+                .footer { text-align: center; margin-top: 20px; font-size: 0.8em; }
             </style>
         </head>
         <body>
             <div class="header">
-                <h1>📞 Registro de Llamadas (CDR)</h1>
-                <p><strong>Total de registros:</strong> {{ rows|length }}</p>
-                <p><strong>Generado:</strong> {{ datetime.now().strftime('%Y-%m-%d %H:%M:%S') }}</p>
-            </div>
-            
-            <!-- ✅ MOSTRAR FILTROS APLICADOS -->
-            {% if phone_number or calling_number or called_number or start_date or end_date or status or direction %}
-            <div class="filters">
-                <strong>🔍 Filtros aplicados:</strong><br/>
-                {% if phone_number %}
-                <span class="filter-item">📞 <strong>Número:</strong> {{ phone_number }}</span>
-                {% endif %}
-                {% if calling_number %}
-                <span class="filter-item">📞 <strong>Origen:</strong> {{ calling_number }}</span>
-                {% endif %}
-                {% if called_number %}
-                <span class="filter-item">📱 <strong>Destino:</strong> {{ called_number }}</span>
-                {% endif %}
-                {% if start_date %}
-                <span class="filter-item">📅 <strong>Desde:</strong> {{ start_date }}</span>
-                {% endif %}
-                {% if end_date %}
-                <span class="filter-item">📅 <strong>Hasta:</strong> {{ end_date }}</span>
-                {% endif %}
-                {% if status %}
-                <span class="filter-item">📊 <strong>Estado:</strong> {{ status }}</span>
-                {% endif %}
-                {% if direction %}
-                <span class="filter-item">🔄 <strong>Dirección:</strong> {{ direction }}</span>
+                <h1>Reporte de Llamadas (CDR)</h1>
+                <p>Fecha: {{ datetime.now().strftime('%Y-%m-%d %H:%M:%S') }}</p>
+                {% if start_date or end_date %}
+                <p>Período: {{ start_date or 'Inicio' }} - {{ end_date or 'Fin' }}</p>
                 {% endif %}
             </div>
-            {% endif %}
             
-            {% if rows %}
             <table>
                 <thead>
                     <tr>
-                        <th>📞 Origen</th>
-                        <th>📱 Destino</th>
-                        <th>📅 Fecha/Hora Inicio</th>
-                        <th>⏱️ Duración</th>
-                        <th>💰 Facturada</th>
-                        <th>🌍 Zona</th>
-                        <th>💵 Costo</th>
-                        <th>📊 Estado</th>
+                        <th>Origen</th>
+                        <th>Destino</th>
+                        <th>Fecha/Hora</th>
+                        <th>Duración</th>
+                        <th>Facturada</th>
+                        <th>Zona</th>
+                        <th>Costo</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -3490,26 +3323,18 @@ def export_cdr_pdf(
                     <tr>
                         <td>{{ row[0] }}</td>
                         <td>{{ row[1] }}</td>
-                        <td>{{ row[2].strftime('%Y-%m-%d %H:%M:%S') if row[2] else 'N/A' }}</td>
-                        <td>{{ "%d:%02d"|format(row[4]//60, row[4]%60) if row[4] else '0:00' }}</td>
-                        <td>{{ "%d:%02d"|format(row[5]//60, row[5]%60) if row[5] else '0:00' }}</td>
+                        <td>{{ row[2].strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>{{ "%d:%02d"|format(row[4]//60, row[4]%60) }}</td>
+                        <td>{{ "%d:%02d"|format(row[5]//60, row[5]%60) }}</td>
                         <td>{{ row[8] or 'N/A' }}</td>
-                        <td>S/{{ "%.6f"|format(row[6]) if row[6] else '0.000000' }}</td>
-                        <td>{{ row[7] or 'N/A' }}</td>
+                        <td>S/{{ "%.6f"|format(row[6]) }}</td>
                     </tr>
                 {% endfor %}
                 </tbody>
             </table>
-            {% else %}
-            <div style="text-align: center; padding: 40px; color: #666;">
-                <h3>📭 No se encontraron registros</h3>
-                <p>No hay llamadas que coincidan con los filtros aplicados.</p>
-            </div>
-            {% endif %}
             
             <div class="footer">
-                <p>📄 Reporte generado el {{ datetime.now().strftime('%Y-%m-%d %H:%M:%S') }} | 
-                   📊 Total: {{ rows|length }} registro{{ 's' if rows|length != 1 else '' }}</p>
+                <p>Reporte generado el {{ datetime.now().strftime('%Y-%m-%d %H:%M:%S') }}</p>
             </div>
         </body>
         </html>
@@ -3521,28 +3346,13 @@ def export_cdr_pdf(
             rows=rows, 
             datetime=datetime,
             start_date=start_date,
-            end_date=end_date,
-            calling_number=calling_number,
-            called_number=called_number,
-            phone_number=phone_number,
-            status=status,
-            direction=direction
+            end_date=end_date
         )
         
         # Generar el PDF usando WeasyPrint
         pdf = HTML(string=html_content).write_pdf()
         
-        # ✅ NOMBRE DE ARCHIVO CON INFO DE FILTROS
-        filename_parts = ["cdr_report"]
-        if phone_number:
-            filename_parts.append(f"num_{phone_number}")
-        if status:
-            filename_parts.append(f"status_{status}")
-        if direction:
-            filename_parts.append(f"dir_{direction}")
-        
-        filename_parts.append(datetime.now().strftime('%Y%m%d_%H%M%S'))
-        filename = "_".join(filename_parts) + ".pdf"
+        filename = f"cdr_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         
         db.close()
         
@@ -3557,35 +3367,33 @@ def export_cdr_pdf(
         db.close()
         import traceback
         traceback.print_exc()
-        return {"error": f"Error al generar PDF: {str(e)}"}
+        return {"error": str(e)}
 
-# ✅ ENDPOINT EXCEL USANDO LA MISMA LÓGICA
-@app.get("/export/cdr/excel")
-def export_cdr_excel(
+@app.get("/export/cdr/csv")
+def export_cdr_csv(
     user=Depends(admin_only),
     start_date: str = Query(None),
     end_date: str = Query(None),
     calling_number: str = Query(None),
-    called_number: str = Query(None),
-    phone_number: str = Query(None),
-    status: str = Query(None),
-    direction: str = Query(None)
+    called_number: str = Query(None)
 ):
-    """Exporta los registros CDR a un archivo Excel con todos los filtros."""
+    """Exporta los registros CDR a un archivo CSV."""
     from sqlalchemy import text
     from datetime import datetime
-    import pandas as pd
+    import csv
     import io
     
     db = SessionLocal()
     
     try:
-        # ✅ USAR LA MISMA LÓGICA DE CONSULTA QUE EL PDF
+        # Construir la consulta base
         query = """
             SELECT c.calling_number, c.called_number, 
                    c.start_time, c.end_time, c.duration_seconds, 
                    c.duration_billable, c.cost, c.status,
-                   z.nombre as zona
+                   z.nombre as zona_nombre, c.connect_time,
+                   c.dialing_time, c.network_reached_time, c.network_alerting_time,
+                   c.direction, c.release_cause
             FROM cdr c
             LEFT JOIN zonas z ON c.zona_id = z.id
             WHERE 1=1
@@ -3593,16 +3401,12 @@ def export_cdr_excel(
         
         params = {}
         
-        # Aplicar filtros (misma lógica que PDF)
-        if phone_number:
-            query += " AND (c.calling_number LIKE :phone_pattern OR c.called_number LIKE :phone_pattern)"
-            params["phone_pattern"] = f"%{phone_number}%"
-        
-        if calling_number and not phone_number:
+        # Agregar filtros si se proporcionan
+        if calling_number:
             query += " AND c.calling_number = :calling_number"
             params["calling_number"] = calling_number
         
-        if called_number and not phone_number:
+        if called_number:
             query += " AND c.called_number = :called_number"
             params["called_number"] = called_number
         
@@ -3614,106 +3418,63 @@ def export_cdr_excel(
             query += " AND c.end_time <= :end_date"
             params["end_date"] = f"{end_date} 23:59:59"
         
-        if status:
-            query += " AND c.status = :status"
-            params["status"] = status
+        # Ordenar por fecha descendente
+        query += " ORDER BY c.start_time DESC LIMIT 10000"
         
-        if direction:
-            query += " AND c.direction = :direction"
-            params["direction"] = direction
-        
-        query += " ORDER BY c.start_time DESC LIMIT 1000"
-        
-        print(f"🔍 Query Excel: {query}")
-        print(f"🔍 Params Excel: {params}")
-        
-        # Ejecutar consulta
+        # Ejecutar la consulta usando text()
         rows = db.execute(text(query), params).fetchall()
         
-        print(f"📊 Registros encontrados para Excel: {len(rows)}")
+        # Crear el archivo CSV en memoria
+        output = io.StringIO()
+        writer = csv.writer(output)
         
-        # Crear DataFrame
-        if rows:
-            df_data = []
-            for row in rows:
-                duration_min = round(row[4]/60, 2) if row[4] else 0
-                billable_min = round(row[5]/60, 2) if row[5] else 0
-                
-                df_data.append({
-                    'Número Origen': row[0],
-                    'Número Destino': row[1],
-                    'Fecha Inicio': row[2].strftime('%Y-%m-%d %H:%M:%S') if row[2] else '',
-                    'Fecha Fin': row[3].strftime('%Y-%m-%d %H:%M:%S') if row[3] else '',
-                    'Duración (seg)': row[4] if row[4] else 0,
-                    'Duración (min)': duration_min,
-                    'Facturable (seg)': row[5] if row[5] else 0,
-                    'Facturable (min)': billable_min,
-                    'Costo': row[6] if row[6] else 0,
-                    'Estado': row[7] if row[7] else '',
-                    'Zona': row[8] if row[8] else ''
-                })
-            
-            df = pd.DataFrame(df_data)
-        else:
-            df = pd.DataFrame()
+        # Escribir encabezados
+        #se retiro columna row[7]: Estado
+        writer.writerow([
+            'Origen', 'Destino', 'Fecha/Hora Inicio', 'Fecha/Hora Fin', 
+            'Duracion Total (seg)', 'Duracion Facturable (seg)', 'Costo', 
+            'Zona', 'Hora Contestado', 'Hora Marcacion',
+            'Hora Alcance Red', 'Hora Timbrando', 'Direccion', 'Codigo Liberacion'
+        ])
         
-        # Crear Excel
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            # Hoja principal con datos
-            df.to_excel(writer, sheet_name='CDR_Data', index=False)
+        # Escribir datos
+        for row in rows:
+            # Formatear fechas y valores numéricos
+            start_time = row[2].strftime('%Y-%m-%d %H:%M:%S') if row[2] else ''
+            end_time = row[3].strftime('%Y-%m-%d %H:%M:%S') if row[3] else ''
+            connect_time = row[9].strftime('%Y-%m-%d %H:%M:%S') if row[9] else ''
+            dialing_time = row[10].strftime('%Y-%m-%d %H:%M:%S') if row[10] else ''
+            network_reached_time = row[11].strftime('%Y-%m-%d %H:%M:%S') if row[11] else ''
+            network_alerting_time = row[12].strftime('%Y-%m-%d %H:%M:%S') if row[12] else ''
             
-            # Hoja de resumen con filtros aplicados
-            summary_data = {
-                'Filtro': [],
-                'Valor': []
-            }
-            
-            if phone_number:
-                summary_data['Filtro'].append('Número')
-                summary_data['Valor'].append(phone_number)
-            if calling_number:
-                summary_data['Filtro'].append('Origen')
-                summary_data['Valor'].append(calling_number)
-            if called_number:
-                summary_data['Filtro'].append('Destino')
-                summary_data['Valor'].append(called_number)
-            if start_date:
-                summary_data['Filtro'].append('Fecha Inicio')
-                summary_data['Valor'].append(start_date)
-            if end_date:
-                summary_data['Filtro'].append('Fecha Fin')
-                summary_data['Valor'].append(end_date)
-            if status:
-                summary_data['Filtro'].append('Estado')
-                summary_data['Valor'].append(status)
-            if direction:
-                summary_data['Filtro'].append('Dirección')
-                summary_data['Valor'].append(direction)
-            
-            summary_data['Filtro'].extend(['Total Registros', 'Fecha Generación'])
-            summary_data['Valor'].extend([len(rows), datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
-            
-            summary_df = pd.DataFrame(summary_data)
-            summary_df.to_excel(writer, sheet_name='Resumen', index=False)
-        
-        buffer.seek(0)
-        
-        # Nombre de archivo
-        filename_parts = ["cdr_report"]
-        if phone_number:
-            filename_parts.append(f"num_{phone_number}")
-        if status:
-            filename_parts.append(f"status_{status}")
-        
-        filename_parts.append(datetime.now().strftime('%Y%m%d_%H%M%S'))
-        filename = "_".join(filename_parts) + ".xlsx"
+            #se retiro columna row[7]: status
+            writer.writerow([
+                row[0],                     # calling_number
+                row[1],                     # called_number
+                start_time,                 # start_time
+                end_time,                   # end_time
+                row[4],                     # duration_seconds
+                row[5],                     # duration_billable
+                f"{float(row[6]):.4f}",     # cost
+                row[8],                     # zona_nombre
+                connect_time,               # connect_time
+                dialing_time,               # dialing_time
+                network_reached_time,       # network_reached_time
+                network_alerting_time,      # network_alerting_time
+                row[13],                    # direction
+                row[14]                     # release_cause
+            ])
         
         db.close()
         
+        # Configurar el nombre del archivo
+        filename = f"cdr_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        # Devolver el CSV como respuesta
+        output.seek(0)
         return StreamingResponse(
-            io.BytesIO(buffer.getvalue()),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            io.StringIO(output.getvalue()),
+            media_type="text/csv",
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
         
@@ -3721,8 +3482,260 @@ def export_cdr_excel(
         db.close()
         import traceback
         traceback.print_exc()
-        return {"error": f"Error al generar Excel: {str(e)}"}
+        return {"error": str(e)}
+
+@app.get("/export/cdr/excel")
+def export_cdr_excel(
+    user=Depends(admin_only),
+    start_date: str = Query(None),
+    end_date: str = Query(None),
+    calling_number: str = Query(None),
+    called_number: str = Query(None)
+):
+    """Exporta los registros CDR a un archivo Excel (XLS)."""
+    from sqlalchemy import text
+    from datetime import datetime
+    import io
+    
+    db = SessionLocal()
+    
+    try:
+        # Construir la consulta base
+        query = """
+            SELECT c.calling_number, c.called_number, 
+                   c.start_time, c.end_time, c.duration_seconds, 
+                   c.duration_billable, c.cost, c.status,
+                   z.nombre as zona_nombre, c.connect_time,
+                   c.dialing_time, c.network_reached_time, c.network_alerting_time,
+                   c.direction, c.release_cause
+            FROM cdr c
+            LEFT JOIN zonas z ON c.zona_id = z.id
+            WHERE 1=1
+        """
+        
+        params = {}
+        
+        # Agregar filtros si se proporcionan
+        if calling_number:
+            query += " AND c.calling_number = :calling_number"
+            params["calling_number"] = calling_number
+        
+        if called_number:
+            query += " AND c.called_number = :called_number"
+            params["called_number"] = called_number
+        
+        if start_date:
+            query += " AND c.start_time >= :start_date"
+            params["start_date"] = f"{start_date} 00:00:00"
+        
+        if end_date:
+            query += " AND c.end_time <= :end_date"
+            params["end_date"] = f"{end_date} 23:59:59"
+        
+        # Ordenar por fecha descendente
+        query += " ORDER BY c.start_time DESC LIMIT 10000"
+        
+        # Ejecutar la consulta usando text()
+        rows = db.execute(text(query), params).fetchall()
+        
+        # Lista de encabezados
+        headers = [
+            'Origen', 'Destino', 'Fecha/Hora Inicio', 'Fecha/Hora Fin', 
+            'Duración Total (seg)', 'Duración Facturable (seg)', 'Costo', 
+            'Zona', 'Hora Contestado', 'Hora Marcación',
+            'Hora Alcance Red', 'Hora Timbrando', 'Dirección', 'Código Liberación'
+        ]
+        
+        # Preparar los datos para Excel
+        excel_data = []
+        
+        # Añadir encabezados
+        excel_data.append(headers)
+        
+        # Añadir filas de datos
+        for row in rows:
+            # Formatear fechas y valores numéricos
+            start_time = row[2].strftime('%Y-%m-%d %H:%M:%S') if row[2] else ''
+            end_time = row[3].strftime('%Y-%m-%d %H:%M:%S') if row[3] else ''
+            connect_time = row[9].strftime('%Y-%m-%d %H:%M:%S') if row[9] else ''
+            dialing_time = row[10].strftime('%Y-%m-%d %H:%M:%S') if row[10] else ''
+            network_reached_time = row[11].strftime('%Y-%m-%d %H:%M:%S') if row[11] else ''
+            network_alerting_time = row[12].strftime('%Y-%m-%d %H:%M:%S') if row[12] else ''
+            
+            excel_data.append([
+                row[0],                     # calling_number
+                row[1],                     # called_number
+                start_time,                 # start_time
+                end_time,                   # end_time
+                row[4],                     # duration_seconds
+                row[5],                     # duration_billable
+                float(row[6]),              # cost (como número para Excel)
+                row[8],                     # zona_nombre
+                connect_time,               # connect_time
+                dialing_time,               # dialing_time
+                network_reached_time,       # network_reached_time
+                network_alerting_time,      # network_alerting_time
+                row[13],                    # direction
+                row[14]                     # release_cause
+            ])
+        
+        # Nombre del archivo
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"cdr_report_{timestamp}.xls"
+        
+        # Intentar usar diferentes bibliotecas para generar el Excel
+        excel_binary = None
+        
+        # Intento 1: Usar xlwt (mejor para XLS)
+        try:
+            import xlwt
+            
+            # Crear libro y hoja
+            workbook = xlwt.Workbook()
+            worksheet = workbook.add_sheet('CDR Report')
+            
+            # Estilos
+            header_style = xlwt.easyxf('font: bold on; align: wrap on, vert centre, horiz center; pattern: pattern solid, fore_color gray25')
+            date_style = xlwt.easyxf(num_format_str='YYYY-MM-DD HH:MM:SS')
+            number_style = xlwt.easyxf(num_format_str='0.000000')
+            
+            # Establecer anchos de columna
+            for i in range(len(headers)):
+                worksheet.col(i).width = 256 * 20  # Aproximadamente 20 caracteres de ancho
+            
+            # Escribir datos
+            for row_idx, row_data in enumerate(excel_data):
+                for col_idx, cell_value in enumerate(row_data):
+                    # Aplicar estilos según el tipo de datos
+                    if row_idx == 0:  # Encabezados
+                        worksheet.write(row_idx, col_idx, cell_value, header_style)
+                    elif col_idx in [2, 3, 8, 9, 10, 11]:  # Columnas de fecha
+                        worksheet.write(row_idx, col_idx, cell_value, date_style)
+                    elif col_idx == 6:  # Columna de costo
+                        worksheet.write(row_idx, col_idx, cell_value, number_style)
+                    else:
+                        worksheet.write(row_idx, col_idx, cell_value)
+            
+            # Guardar a un BytesIO
+            output = io.BytesIO()
+            workbook.save(output)
+            excel_binary = output.getvalue()
+            
+            print("✅ Excel generado con xlwt")
+            
+        except ImportError:
+            # xlwt no está disponible, intentar con openpyxl
+            try:
+                import openpyxl
+                from openpyxl.styles import Font, Alignment, PatternFill
+                from openpyxl.utils import get_column_letter
+                
+                # Crear libro y hoja
+                workbook = openpyxl.Workbook()
+                worksheet = workbook.active
+                worksheet.title = 'CDR Report'
+                
+                # Estilos
+                header_font = Font(bold=True)
+                header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                header_fill = PatternFill(start_color='DDDDDD', end_color='DDDDDD', fill_type='solid')
+                
+                # Establecer anchos de columna
+                for i in range(len(headers)):
+                    worksheet.column_dimensions[get_column_letter(i+1)].width = 20
+                
+                # Escribir datos
+                for row_idx, row_data in enumerate(excel_data, 1):  # openpyxl es 1-based
+                    for col_idx, cell_value in enumerate(row_data, 1):
+                        cell = worksheet.cell(row=row_idx, column=col_idx, value=cell_value)
+                        
+                        # Aplicar estilos a los encabezados
+                        if row_idx == 1:
+                            cell.font = header_font
+                            cell.alignment = header_alignment
+                            cell.fill = header_fill
+                
+                # Guardar a un BytesIO
+                output = io.BytesIO()
+                workbook.save(output)
+                excel_binary = output.getvalue()
+                
+                print("✅ Excel generado con openpyxl")
+                
+            except ImportError:
+                # openpyxl no está disponible, intentar con pandas
+                try:
+                    import pandas as pd
                     
+                    # Convertir datos a DataFrame (omitir la fila de encabezados)
+                    df = pd.DataFrame(excel_data[1:], columns=headers)
+                    
+                    # Guardar a un BytesIO
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df.to_excel(writer, sheet_name='CDR Report', index=False)
+                        
+                        # Dar formato a la hoja
+                        workbook = writer.book
+                        worksheet = writer.sheets['CDR Report']
+                        
+                        # Formato para encabezados
+                        header_format = workbook.add_format({
+                            'bold': True,
+                            'bg_color': '#DDDDDD',
+                            'align': 'center',
+                            'valign': 'vcenter',
+                            'text_wrap': True
+                        })
+                        
+                        # Aplicar formato a encabezados
+                        for col_num, value in enumerate(df.columns.values):
+                            worksheet.write(0, col_num, value, header_format)
+                            worksheet.set_column(col_num, col_num, 20)
+                    
+                    excel_binary = output.getvalue()
+                    
+                    print("✅ Excel generado con pandas")
+                    
+                except ImportError:
+                    # Si ninguna biblioteca Excel está disponible, generar CSV como alternativa
+                    print("⚠️ No hay bibliotecas Excel disponibles, generando CSV")
+                    import csv
+                    
+                    output = io.StringIO()
+                    writer = csv.writer(output)
+                    
+                    # Escribir todas las filas
+                    for row_data in excel_data:
+                        writer.writerow(row_data)
+                    
+                    # Cambiar el nombre de archivo a CSV
+                    filename = f"cdr_report_{timestamp}.csv"
+                    
+                    # Devolver el CSV como respuesta
+                    output.seek(0)
+                    db.close()
+                    return StreamingResponse(
+                        io.StringIO(output.getvalue()),
+                        media_type="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename={filename}"}
+                    )
+        
+        db.close()
+        
+        # Devolver el Excel como respuesta
+        return StreamingResponse(
+            io.BytesIO(excel_binary),
+            media_type="application/vnd.ms-excel",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except Exception as e:
+        db.close()
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+                
 # Exportar reporte de consumo por zona
 @app.get("/export/consumo_zona/pdf")
 async def export_consumo_zona_pdf(user=Depends(admin_only)):
@@ -4618,399 +4631,77 @@ class CucmFacManager:
         """Elimina un código de autorización forzada"""
         try:
             # Estructura según el patrón establecido
-            response = self.client.removeFacInfo(name=code)
+            response = self.client.removeFacInfo(code=code)
             return True
         except Exception as e:
             print(f"Error al eliminar FAC {code}: {e}")
             return False
         
 
-class CucmFacSyncManager:
-    """Gestor avanzado para sincronización bidireccional de códigos FAC"""
-    
-    def __init__(self):
-        self.fac_manager = CucmFacManager()
-    
-    def get_all_cucm_fac_codes(self):
-        """Obtiene todos los códigos FAC desde CUCM"""
-        try:
-            response = self.fac_manager.list_fac_info()
-            return process_fac_info(response) if response else []
-        except Exception as e:
-            logger.error(f"Error obteniendo códigos FAC de CUCM: {e}")
-            return []
-    
-    def get_all_local_fac_codes(self, db):
-        """Obtiene todos los códigos FAC de la base de datos local"""
-        try:
-            return db.query(FacCode).all()
-        except Exception as e:
-            logger.error(f"Error obteniendo códigos FAC locales: {e}")
-            return []
-    
-    def sync_with_cucm_as_authority(self, admin_username: str = "system"):
-        """
-        Sincronización completa con CUCM como autoridad principal
-        - CUCM es la fuente de verdad
-        - Códigos en CUCM pero no en BD → Se crean en BD
-        - Códigos en BD pero no en CUCM → Se eliminan de BD
-        - Códigos diferentes → Se actualizan en BD según CUCM
-        """
-        db = SessionLocal()
-        
-        try:
-            logger.info("🔄 Iniciando sincronización con CUCM como autoridad")
-            
-            # 1. Obtener códigos de ambas fuentes
-            cucm_codes = self.get_all_cucm_fac_codes()
-            local_codes = self.get_all_local_fac_codes(db)
-            
-            # Crear diccionarios para comparación
-            cucm_dict = {code['code']: code for code in cucm_codes if code.get('code')}
-            local_dict = {code.authorization_code: code for code in local_codes}
-            
-            logger.info(f"📊 CUCM: {len(cucm_dict)} códigos, BD Local: {len(local_dict)} códigos")
-            
-            stats = {
-                "created": 0,
-                "updated": 0, 
-                "deleted": 0,
-                "unchanged": 0,
-                "errors": 0
-            }
-            
-            # 2. PROCESAR CÓDIGOS EN CUCM (crear/actualizar en BD)
-            for code, cucm_data in cucm_dict.items():
-                try:
-                    if code in local_dict:
-                        # Verificar si necesita actualización
-                        local_code = local_dict[code]
-                        needs_update = (
-                            local_code.authorization_code_name != cucm_data.get('name', '') or
-                            local_code.authorization_level != cucm_data.get('level', 0)
-                        )
-                        
-                        if needs_update:
-                            # ACTUALIZAR código existente
-                            local_code.authorization_code_name = cucm_data.get('name', '')
-                            local_code.authorization_level = cucm_data.get('level', 0)
-                            local_code.active = True
-                            local_code.cucm_synced = True
-                            local_code.updated_at = datetime.utcnow()
-                            
-                            stats["updated"] += 1
-                            self._audit_log(db, code, "sync_update_from_cucm", admin_username,
-                                          f"Actualizado desde CUCM: {cucm_data.get('name', '')}")
-                            logger.info(f"📝 Actualizado: {code}")
-                        else:
-                            # Marcar como sincronizado sin cambios
-                            local_code.cucm_synced = True
-                            stats["unchanged"] += 1
-                    else:
-                        # CREAR nuevo código desde CUCM
-                        new_code = FacCode(
-                            authorization_code=code,
-                            authorization_code_name=cucm_data.get('name', f'FAC_{code}'),
-                            authorization_level=cucm_data.get('level', 0),
-                            description=f"Sincronizado desde CUCM el {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
-                            active=True,
-                            cucm_synced=True
-                        )
-                        
-                        db.add(new_code)
-                        stats["created"] += 1
-                        self._audit_log(db, code, "sync_create_from_cucm", admin_username,
-                                      f"Creado desde CUCM: {cucm_data.get('name', '')}")
-                        logger.info(f"➕ Creado: {code}")
-                
-                except Exception as e:
-                    stats["errors"] += 1
-                    self._audit_log(db, code, "sync_error", admin_username, f"Error: {str(e)}", False)
-                    logger.error(f"❌ Error procesando {code}: {e}")
-            
-            # 3. ELIMINAR CÓDIGOS QUE ESTÁN EN BD PERO NO EN CUCM
-            for code, local_code in local_dict.items():
-                if code not in cucm_dict:
-                    try:
-                        # ELIMINAR código que no está en CUCM
-                        db.delete(local_code)
-                        stats["deleted"] += 1
-                        self._audit_log(db, code, "sync_delete_not_in_cucm", admin_username,
-                                      f"Eliminado - No encontrado en CUCM")
-                        logger.info(f"🗑️ Eliminado: {code}")
-                    except Exception as e:
-                        stats["errors"] += 1
-                        self._audit_log(db, code, "sync_delete_error", admin_username, f"Error eliminando: {str(e)}", False)
-                        logger.error(f"❌ Error eliminando {code}: {e}")
-            
-            # 4. CONFIRMAR CAMBIOS
-            db.commit()
-            
-            # 5. REGISTRAR RESUMEN
-            summary_msg = f"Sincronización completada - Creados: {stats['created']}, Actualizados: {stats['updated']}, Eliminados: {stats['deleted']}, Sin cambios: {stats['unchanged']}, Errores: {stats['errors']}"
-            self._audit_log(db, "SYNC_SUMMARY", "sync_complete", admin_username, summary_msg)
-            
-            logger.info(f"✅ {summary_msg}")
-            
-            return {
-                "success": True,
-                "message": summary_msg,
-                "stats": stats
-            }
-        
-        except Exception as e:
-            db.rollback()
-            error_msg = f"Error general en sincronización: {str(e)}"
-            self._audit_log(db, "SYNC_ERROR", "sync_error", admin_username, error_msg, False)
-            logger.error(f"❌ {error_msg}")
-            
-            return {
-                "success": False,
-                "message": error_msg,
-                "stats": {"errors": 1}
-            }
-        
-        finally:
-            db.close()
-    
-    def delete_fac_from_both_systems(self, code: str, admin_username: str):
-        """
-        Elimina un código FAC tanto del CUCM como de la base de datos local
-        """
-        db = SessionLocal()
-        
-        try:
-            logger.info(f"🗑️ Eliminando código FAC {code} de ambos sistemas")
-            
-            # 1. Verificar que existe en BD local
-            local_code = db.query(FacCode).filter(FacCode.authorization_code == code).first()
-            if not local_code:
-                return {
-                    "success": False,
-                    "message": f"Código {code} no encontrado en la base de datos local"
-                }
-            
-            # 2. Eliminar del CUCM primero
-            cucm_success = self.fac_manager.remove_fac_info(code)
-            
-            # 3. Eliminar de la BD local
-            db.delete(local_code)
-            
-            # 4. Registrar auditoría
-            self._audit_log(db, code, "manual_delete_both", admin_username,
-                          f"Eliminado de ambos sistemas - CUCM: {'éxito' if cucm_success else 'falló'}")
-            
-            db.commit()
-            
-            message = f"Código {code} eliminado exitosamente"
-            if not cucm_success:
-                message += " (advertencia: falló eliminación en CUCM)"
-            
-            logger.info(f"✅ {message}")
-            
-            return {
-                "success": True,
-                "message": message,
-                "cucm_deleted": cucm_success,
-                "local_deleted": True
-            }
-        
-        except Exception as e:
-            db.rollback()
-            error_msg = f"Error eliminando código {code}: {str(e)}"
-            self._audit_log(db, code, "delete_error", admin_username, error_msg, False)
-            logger.error(f"❌ {error_msg}")
-            
-            return {
-                "success": False,
-                "message": error_msg
-            }
-        
-        finally:
-            db.close()
-    
-    def create_fac_in_both_systems(self, fac_data: dict, admin_username: str):
-        """
-        Crea un código FAC en ambos sistemas (CUCM y BD local)
-        """
-        db = SessionLocal()
-        
-        try:
-            code = fac_data['authorization_code']
-            name = fac_data['authorization_code_name']
-            level = fac_data['authorization_level']
-            
-            logger.info(f"➕ Creando código FAC {code} en ambos sistemas")
-            
-            # 1. Verificar que no existe en BD local
-            existing = db.query(FacCode).filter(FacCode.authorization_code == code).first()
-            if existing:
-                return {
-                    "success": False,
-                    "message": f"El código {code} ya existe en la base de datos local"
-                }
-            
-            # 2. Crear en CUCM primero
-            cucm_success = self.fac_manager.add_fac_info(code, name, level)
-            
-            # 3. Crear en BD local
-            new_fac = FacCode(
-                authorization_code=code,
-                authorization_code_name=name,
-                authorization_level=level,
-                description=fac_data.get('description', ''),
-                active=True,
-                cucm_synced=cucm_success
-            )
-            
-            db.add(new_fac)
-            
-            # 4. Registrar auditoría
-            self._audit_log(db, code, "manual_create_both", admin_username,
-                          f"Creado en ambos sistemas - CUCM: {'éxito' if cucm_success else 'falló'}")
-            
-            db.commit()
-            
-            message = f"Código {code} creado exitosamente"
-            if not cucm_success:
-                message += " (advertencia: falló creación en CUCM)"
-            
-            logger.info(f"✅ {message}")
-            
-            return {
-                "success": True,
-                "message": message,
-                "cucm_created": cucm_success,
-                "local_created": True,
-                "id": new_fac.id
-            }
-        
-        except Exception as e:
-            db.rollback()
-            error_msg = f"Error creando código {code}: {str(e)}"
-            self._audit_log(db, code, "create_error", admin_username, error_msg, False)
-            logger.error(f"❌ {error_msg}")
-            
-            return {
-                "success": False,
-                "message": error_msg
-            }
-        
-        finally:
-            db.close()
-    
-    def _audit_log(self, db, code: str, action: str, username: str, details: str, success: bool = True):
-        """Método auxiliar para registrar auditoría"""
-        audit = FacAudit(
-            authorization_code=code,
-            action=action,
-            admin_user=username,
-            details=details,
-            success=success
-        )
-        db.add(audit)
-
 # IMPLEMENTACIÓN DE FAC (FORCED AUTHORIZATION CODES)
 @app.get("/dashboard/fac")
 async def dashboard_fac(request: Request, user=Depends(admin_only)):
-    """Dashboard corregido para mostrar códigos FAC con todos los campos"""
+    """Dashboard para gestionar códigos de autorización forzada (FAC)"""
     if isinstance(user, RedirectResponse):
         return user
     
     db = SessionLocal()
-    
-    # 1. Obtener códigos FAC de la base de datos local con TODOS los campos
+    # Obtener códigos FAC de la base de datos local
     local_fac_list = []
     try:
-        # ✅ Consulta explícita para asegurar que obtenemos todos los campos
-        local_codes = db.query(FacCode).order_by(FacCode.authorization_code).all()
-        
+        local_codes = db.query(FacCode).all()
         for code in local_codes:
             local_fac_list.append({
                 'id': code.id,
                 'code': code.authorization_code,
                 'name': code.authorization_code_name,
-                'level': code.authorization_level,  # ✅ Asegurar que se mapea correctamente
-                'description': code.description or '',
+                'level': code.authorization_level,
+                'description': code.description,
                 'active': code.active,
                 'cucm_synced': code.cucm_synced,
-                'source': 'local',
-                'created_at': code.created_at.isoformat() if code.created_at else None,
-                'updated_at': code.updated_at.isoformat() if code.updated_at else None
+                'source': 'local'  # Indicar que proviene de la BD local
             })
-            
-        logger.info(f"📊 Códigos locales obtenidos: {len(local_fac_list)}")
-        
-        # ✅ Debug: Imprimir primer código para verificar datos
-        if local_fac_list:
-            first_code = local_fac_list[0]
-            logger.info(f"🔍 Primer código: {first_code['code']} - Nivel: {first_code['level']} - Nombre: {first_code['name']}")
-            
     except Exception as e:
-        logger.error(f"❌ Error obteniendo códigos FAC locales: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Error obteniendo códigos FAC locales: {e}")
     
-    # 2. Intentar obtener códigos del CUCM
+    # Intentar obtener códigos del CUCM también
     cucm_fac_list = []
-    cucm_error = None
     try:
-        logger.info("🔄 Intentando conectar con CUCM...")
-        sync_manager = CucmFacSyncManager()
-        cucm_codes = sync_manager.get_all_cucm_fac_codes()
+        # Instanciar el gestor
+        fac_manager = CucmFacManager()
         
-        logger.info(f"📡 Códigos CUCM obtenidos: {len(cucm_codes)}")
-        
-        # ✅ Procesar códigos de CUCM con verificación de campos
-        for cucm_item in cucm_codes:
-            if cucm_item and isinstance(cucm_item, dict):
-                cucm_fac_list.append({
-                    'code': cucm_item.get('code', ''),
-                    'name': cucm_item.get('name', ''),
-                    'level': cucm_item.get('level', 0),  # ✅ Asegurar valor por defecto
-                    'source': 'cucm',
-                    'description': f"Desde CUCM - Nivel: {cucm_item.get('level', 0)}"
-                })
-                
-        # ✅ Debug: Imprimir primer código CUCM
-        if cucm_fac_list:
-            first_cucm = cucm_fac_list[0]
-            logger.info(f"🔍 Primer código CUCM: {first_cucm['code']} - Nivel: {first_cucm['level']} - Nombre: {first_cucm['name']}")
-            
+        # Obtener lista de códigos FAC de CUCM
+        response = fac_manager.list_fac_info()
+
+        if response:
+            try:
+                # Procesar resultados
+                cucm_fac_list = process_fac_info(response)
+            except Exception as e:
+                print(f"Error procesando resultados FAC desde CUCM: {e}")
     except Exception as e:
-        cucm_error = str(e)
-        logger.error(f"❌ Error conectando con CUCM: {e}")
+        print(f"Error conectando con CUCM: {e}")
     
+    # Cerrar la conexión a la base de datos
     db.close()
     
-    # 3. Combinar listas - priorizar datos locales
+    # Combinar ambas listas (preferimos los datos locales si hay duplicados)
     combined_list = local_fac_list.copy()
-    local_codes_set = {item['code'] for item in local_fac_list}
     
-    # Agregar códigos que solo están en CUCM
+    # Agregar códigos de CUCM que no están en la lista local
+    local_codes = {item['code'] for item in local_fac_list}
     for cucm_item in cucm_fac_list:
-        if cucm_item['code'] not in local_codes_set:
+        if cucm_item['code'] not in local_codes:
             combined_list.append(cucm_item)
-    
-    # 4. Estadísticas
-    stats = {
-        "local_count": len(local_fac_list),
-        "cucm_count": len(cucm_fac_list),
-        "total_count": len(combined_list),
-        "cucm_error": cucm_error
-    }
-    
-    # ✅ Debug: Imprimir estadísticas finales
-    logger.info(f"📊 Estadísticas finales: {stats}")
-    logger.info(f"📋 Total códigos a mostrar: {len(combined_list)}")
     
     return templates.TemplateResponse("dashboard_fac.html", {
         "request": request, 
         "fac_list": combined_list, 
         "user": user,
-        **stats
+        "local_count": len(local_fac_list),
+        "cucm_count": len(cucm_fac_list),
+        "total_count": len(combined_list)
     })
-
 
 @app.get("/api/fac")
 async def get_fac_list(user=Depends(admin_only)):
@@ -5025,7 +4716,6 @@ async def get_fac_list(user=Depends(admin_only)):
     fac_list = process_fac_info(response)
 
     return {"fac_codes": fac_list}
-
 
 def process_fac_info(response):
     """
@@ -5212,21 +4902,19 @@ async def update_fac(
         db.close()
         raise HTTPException(status_code=500, detail=f"Error al actualizar código FAC: {str(e)}")
 
-@app.delete("/api/fac/{fac_id}")
-async def delete_fac(fac_id: int, user=Depends(admin_only)):
-    """API para eliminar un código FAC por ID"""
+@app.delete("/api/fac/{code}")
+async def delete_fac(code: str, user=Depends(admin_only)):
+    """API para eliminar un código FAC"""
     if isinstance(user, RedirectResponse):
         return user
     
     db = SessionLocal()
     try:
-        # Buscar el código por ID en la BD local
-        fac = db.query(FacCode).filter(FacCode.id == fac_id).first()
+        # Buscar el código en la BD local
+        fac = db.query(FacCode).filter(FacCode.authorization_code == code).first()
         if not fac:
             db.close()
             raise HTTPException(status_code=404, detail="Código FAC no encontrado")
-        
-        code = fac.authorization_code_name  # Guardar el código para usar en CUCM
         
         # Eliminar de CUCM primero
         fac_manager = CucmFacManager()
@@ -5255,7 +4943,7 @@ async def delete_fac(fac_id: int, user=Depends(admin_only)):
         db.rollback()
         db.close()
         raise HTTPException(status_code=500, detail=f"Error al eliminar código FAC: {str(e)}")
-        
+    
 @app.get("/api/fac/test-connection")
 async def test_fac_connection(user=Depends(admin_only)):
     """API para probar la conexión con CUCM y listar códigos FAC"""
@@ -5688,221 +5376,6 @@ async def sync_fac_from_cucm(background_tasks: BackgroundTasks, user=Depends(adm
     
     return {"message": "Importación iniciada en segundo plano", "status": "success"}
 
-def sync_fac_from_cucm_to_database(admin_username: str = "system"):
-    """
-    NUEVA FUNCIÓN: Sincroniza códigos FAC desde CUCM hacia la base de datos
-    Esta función SÍ inserta los códigos que faltan
-    """
-    db = SessionLocal()
-    
-    try:
-        # 1. Obtener códigos de CUCM usando tu función existente
-        fac_manager = CucmFacManager()
-        response = fac_manager.list_fac_info()
-        
-        # Usar tu función process_fac_info para procesar la respuesta
-        cucm_fac_list = process_fac_info(response)
-        logger.info(f"Obtenidos {len(cucm_fac_list)} códigos de CUCM")
-        
-        if not cucm_fac_list:
-            logger.warning("No se obtuvieron códigos de CUCM")
-            return {
-                "success": False,
-                "message": "No se pudieron obtener códigos de CUCM",
-                "stats": {"created": 0, "updated": 0, "errors": 1}
-            }
-        
-        # 2. Obtener códigos existentes en la base de datos
-        existing_codes = {fac.authorization_code: fac for fac in db.query(FacCode).all()}
-        logger.info(f"Códigos existentes en BD: {len(existing_codes)}")
-        
-        # 3. Estadísticas de sincronización
-        stats = {
-            "created": 0,
-            "updated": 0,
-            "deactivated": 0,
-            "errors": 0,
-            "cucm_total": len(cucm_fac_list),
-            "local_total": len(existing_codes)
-        }
-        
-        # 4. SINCRONIZAR: Para cada código en CUCM
-        for cucm_fac in cucm_fac_list:
-            code = cucm_fac['code']
-            
-            if not code:  # Saltar códigos sin código válido
-                continue
-                
-            try:
-                if code in existing_codes:
-                    # ACTUALIZAR código existente si hay diferencias
-                    local_fac = existing_codes[code]
-                    updated = False
-                    
-                    # Verificar si necesita actualización
-                    if local_fac.authorization_code_name != cucm_fac['name']:
-                        logger.info(f"Actualizando nombre para {code}: '{local_fac.authorization_code_name}' → '{cucm_fac['name']}'")
-                        local_fac.authorization_code_name = cucm_fac['name']
-                        updated = True
-                    
-                    if local_fac.authorization_level != cucm_fac['level']:
-                        logger.info(f"Actualizando nivel para {code}: {local_fac.authorization_level} → {cucm_fac['level']}")
-                        local_fac.authorization_level = cucm_fac['level']
-                        updated = True
-                    
-                    # Si está en CUCM, debe estar activo
-                    if not local_fac.active:
-                        logger.info(f"Reactivando código {code}")
-                        local_fac.active = True
-                        updated = True
-                    
-                    if updated:
-                        local_fac.cucm_synced = True
-                        local_fac.updated_at = datetime.utcnow()
-                        stats["updated"] += 1
-                        
-                        # Registrar auditoría
-                        audit = FacAudit(
-                            authorization_code=code,
-                            action="sync_update_from_cucm",
-                            admin_user=admin_username,
-                            details=f"Actualizado desde CUCM: {cucm_fac['name']} (Nivel: {cucm_fac['level']})",
-                            success=True
-                        )
-                        db.add(audit)
-                    else:
-                        # Marcar como sincronizado aunque no haya cambios
-                        if not local_fac.cucm_synced:
-                            local_fac.cucm_synced = True
-                            local_fac.updated_at = datetime.utcnow()
-                else:
-                    # CREAR nuevo código que está en CUCM pero no en BD
-                    logger.info(f"CREANDO nuevo código desde CUCM: {code} - {cucm_fac['name']}")
-                    
-                    new_fac = FacCode(
-                        authorization_code=code,
-                        authorization_code_name=cucm_fac['name'] or f"FAC_{code}",
-                        authorization_level=cucm_fac['level'] or 0,
-                        description=f"Sincronizado automáticamente desde CUCM el {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
-                        active=True,
-                        cucm_synced=True
-                    )
-                    
-                    db.add(new_fac)
-                    stats["created"] += 1
-                    
-                    # Registrar auditoría
-                    audit = FacAudit(
-                        authorization_code=code,
-                        action="sync_create_from_cucm",
-                        admin_user=admin_username,
-                        details=f"Creado automáticamente desde CUCM: {cucm_fac['name']} (Nivel: {cucm_fac['level']})",
-                        success=True
-                    )
-                    db.add(audit)
-                    
-            except Exception as e:
-                logger.error(f"Error sincronizando código {code}: {e}")
-                stats["errors"] += 1
-                
-                # Registrar error en auditoría
-                audit = FacAudit(
-                    authorization_code=code,
-                    action="sync_error",
-                    admin_user=admin_username,
-                    details=f"Error sincronizando desde CUCM: {str(e)}",
-                    success=False
-                )
-                db.add(audit)
-                continue
-        
-        # 5. Desactivar códigos que están en BD pero NO en CUCM
-        cucm_codes_set = {fac['code'] for fac in cucm_fac_list if fac['code']}
-        for code, local_fac in existing_codes.items():
-            if code not in cucm_codes_set and local_fac.active:
-                logger.info(f"Desactivando código {code} (no está en CUCM)")
-                local_fac.active = False
-                local_fac.cucm_synced = False
-                local_fac.description = f"DESACTIVADO - No encontrado en CUCM (Sync: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')})"
-                local_fac.updated_at = datetime.utcnow()
-                stats["deactivated"] += 1
-                
-                # Auditoría
-                audit = FacAudit(
-                    authorization_code=code,
-                    action="sync_deactivate",
-                    admin_user=admin_username,
-                    details="Desactivado - No encontrado en CUCM",
-                    success=True
-                )
-                db.add(audit)
-        
-        # 6. Registrar resumen final
-        summary = FacAudit(
-            authorization_code="SYNC_SUMMARY",
-            action="sync_complete",
-            admin_user=admin_username,
-            details=f"Sincronización completada - CUCM: {stats['cucm_total']}, BD Local: {stats['local_total']}, Creados: {stats['created']}, Actualizados: {stats['updated']}, Desactivados: {stats['deactivated']}, Errores: {stats['errors']}",
-            success=True
-        )
-        db.add(summary)
-        
-        # Confirmar transacción
-        db.commit()
-        
-        logger.info(f"Sincronización completada: {stats}")
-        
-        return {
-            "success": True,
-            "message": f"Sincronización completada. Creados: {stats['created']}, Actualizados: {stats['updated']}, Desactivados: {stats['deactivated']}",
-            "stats": stats
-        }
-        
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error en sincronización: {e}")
-        
-        # Registrar error general
-        error_audit = FacAudit(
-            authorization_code="SYNC_ERROR",
-            action="sync_error",
-            admin_user=admin_username,
-            details=f"Error general en sincronización: {str(e)}",
-            success=False
-        )
-        db.add(error_audit)
-        db.commit()
-        
-        return {
-            "success": False,
-            "message": f"Error en sincronización: {str(e)}",
-            "stats": {"errors": 1}
-        }
-        
-    finally:
-        db.close()
-
-@app.post("/api/fac/sync-from-cucm-manual")
-async def sync_fac_manual(background_tasks: BackgroundTasks, user=Depends(admin_only)):
-    """Endpoint para ejecutar sincronización manual desde el dashboard"""
-    if isinstance(user, RedirectResponse):
-        return user
-    
-    # Ejecutar sincronización en background
-    background_tasks.add_task(run_sync_with_logging, user["username"])
-    
-    return {
-        "success": True,
-        "message": "Sincronización iniciada. Los códigos de CUCM se insertarán automáticamente en la BD.",
-        "action": "sync_started"
-    }
-
-def run_sync_with_logging(username: str):
-    """Ejecuta la sincronización con logging detallado"""
-    logger.info(f"Iniciando sincronización manual por usuario: {username}")
-    result = sync_fac_from_cucm_to_database(username)
-    logger.info(f"Sincronización completada: {result}")
-
 def import_fac_from_cucm(admin_username: str):
     """Importa códigos FAC desde CUCM a la base de datos local"""
     db = SessionLocal()
@@ -6225,350 +5698,3 @@ async def test_with_your_data_v2():
             "error": str(e),
             "test_data": test_data
         }
-
-
-# ✅ PÁGINA PRINCIPAL DE GESTIÓN FAC PINS
-
-# ✅ MODELO CORREGIDO para asociaciones (referencia a fac_codes)
-class FacPinAssociation(Base):
-    __tablename__ = "fac_pin_associations"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    extension = Column(String(10), unique=True, index=True, nullable=False)
-    fac_code_id = Column(Integer, nullable=False)  # ← REFERENCIA A fac_codes.id
-    user_name = Column(String(100), nullable=True)
-    user_email = Column(String(100), nullable=True)
-    department = Column(String(50), nullable=True)
-    status = Column(String(20), default="active")  # active, inactive
-    notes = Column(String(500), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_by = Column(String(100), nullable=True)
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'extension': self.extension,
-            'fac_code_id': self.fac_code_id,
-            'user_name': self.user_name,
-            'user_email': self.user_email,
-            'department': self.department,
-            'status': self.status,
-            'notes': self.notes,
-            'created_at': self.created_at,
-            'updated_at': self.updated_at,
-            'created_by': self.created_by
-        }
-
-# ✅ DASHBOARD PRINCIPAL CORREGIDO
-@app.get("/dashboard/fac_pins")
-async def dashboard_fac_pins(
-    request: Request, 
-    user=Depends(admin_only),
-    extension: Optional[str] = None,
-    fac_code_id: Optional[int] = None,
-    status: Optional[str] = None,
-    department: Optional[str] = None,
-    page: int = 1
-):
-    if isinstance(user, RedirectResponse):
-        return user
-    
-    db = SessionLocal()
-    try:
-        per_page = 50
-        offset = (page - 1) * per_page
-        
-        # ✅ QUERY CON JOIN a fac_codes
-        query = db.query(
-            FacPinAssociation,
-            FacCode.authorization_code,
-            FacCode.authorization_code_name
-        ).join(
-            FacCode, FacPinAssociation.fac_code_id == FacCode.id
-        ).filter(
-            FacCode.active == True  # Solo códigos FAC activos
-        )
-        
-        # Aplicar filtros
-        if extension:
-            query = query.filter(FacPinAssociation.extension.ilike(f"%{extension}%"))
-        if fac_code_id:
-            query = query.filter(FacPinAssociation.fac_code_id == fac_code_id)
-        if status:
-            query = query.filter(FacPinAssociation.status == status)
-        if department:
-            query = query.filter(FacPinAssociation.department == department)
-        
-        # Contar total y obtener registros
-        total_records = query.count()
-        total_pages = (total_records + per_page - 1) // per_page
-        results = query.order_by(FacPinAssociation.extension).offset(offset).limit(per_page).all()
-        
-        # ✅ PROCESAR RESULTADOS PARA EL TEMPLATE
-        rows = []
-        for assoc, auth_code, auth_name in results:
-            row_data = assoc.to_dict()
-            row_data['authorization_code'] = auth_code
-            row_data['authorization_code_name'] = auth_name
-            rows.append(row_data)
-        
-        # ✅ OBTENER CÓDIGOS FAC ACTIVOS PARA EL FORMULARIO
-        active_fac_codes = db.query(FacCode).filter(FacCode.active == True).order_by(FacCode.authorization_code_name).all()
-        
-        # ✅ CALCULAR ESTADÍSTICAS
-        stats = calculate_fac_stats()
-        
-        return templates.TemplateResponse("fac_pins_management.html", {
-            "request": request,
-            "user": user,
-            "rows": rows,
-            "total_records": total_records,
-            "total_pages": total_pages,
-            "page": page,
-            "stats": stats,
-            "active_fac_codes": active_fac_codes  # ← PARA EL DROPDOWN
-        })
-        
-    except Exception as e:
-        logger.error(f"Error en dashboard_fac_pins: {e}")
-        return templates.TemplateResponse("fac_pins_management.html", {
-            "request": request,
-            "user": user,
-            "rows": [],
-            "error": str(e),
-            "active_fac_codes": []
-        })
-
-def calculate_fac_stats():
-    """Calcular estadísticas usando fac_codes activos"""
-    db = SessionLocal()
-    try:
-        # Total de asociaciones
-        total_extensions = db.query(FacPinAssociation).count()
-        
-        # Asociaciones activas (con códigos FAC activos)
-        active_pins = db.query(FacPinAssociation).join(
-            FacCode, FacPinAssociation.fac_code_id == FacCode.id
-        ).filter(
-            and_(FacPinAssociation.status == 'active', FacCode.active == True)
-        ).count()
-        
-        # Asociaciones inactivas
-        inactive_pins = db.query(FacPinAssociation).filter(FacPinAssociation.status == 'inactive').count()
-        
-        # Códigos FAC disponibles sin asignar
-        assigned_fac_codes = db.query(FacPinAssociation.fac_code_id).filter(FacPinAssociation.status == 'active').all()
-        assigned_ids = [row[0] for row in assigned_fac_codes]
-        
-        if assigned_ids:
-            available_fac_codes = db.query(FacCode).filter(
-                and_(FacCode.active == True, ~FacCode.id.in_(assigned_ids))
-            ).count()
-        else:
-            # Si no hay asignados, todos los activos están disponibles
-            available_fac_codes = db.query(FacCode).filter(FacCode.active == True).count()
-        
-        # Días desde última actualización
-        recent_update = db.query(FacPinAssociation).order_by(FacPinAssociation.updated_at.desc()).first()
-        last_updated_days = 0
-        if recent_update:
-            delta = datetime.utcnow() - recent_update.updated_at
-            last_updated_days = delta.days
-        
-        # ✅ DEBUG LOGS PARA VERIFICAR VALORES
-        logger.info(f"DEBUG FAC Stats - Total: {total_extensions}, Activos: {active_pins}, Disponibles: {available_fac_codes}")
-        
-        return {
-            'total_extensions': total_extensions,
-            'active_pins': active_pins,
-            'inactive_pins': inactive_pins,
-            'unassigned_extensions': available_fac_codes,
-            'last_updated_days': last_updated_days
-        }
-    except Exception as e:
-        logger.error(f"Error calculando estadísticas FAC: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return {
-            'total_extensions': 0,
-            'active_pins': 0,
-            'inactive_pins': 0,
-            'unassigned_extensions': 0,
-            'last_updated_days': 0
-        }
-    finally:
-        # ✅ IMPORTANTE: Cerrar la sesión SIEMPRE
-        db.close()
-
-# ✅ API PARA CREAR NUEVA ASOCIACIÓN (CORREGIDA)
-@app.post("/api/fac-pins")
-async def create_fac_pin_association(
-    request: Request,
-    user=Depends(admin_only),
-    extension: str = Form(...),
-    fac_code_id: int = Form(...),  # ← CAMBIO: ID del código FAC
-    user_name: Optional[str] = Form(None),
-    user_email: Optional[str] = Form(None),
-    department: Optional[str] = Form(None),
-    status: str = Form("active"),
-    notes: Optional[str] = Form(None)
-):
-    if isinstance(user, RedirectResponse):
-        return user
-    
-    db = SessionLocal()
-    try:
-        # Verificar que la extensión no exista
-        existing = db.query(FacPinAssociation).filter(FacPinAssociation.extension == extension).first()
-        if existing:
-            return RedirectResponse(url="/dashboard/fac_pins?error=extension_exists", status_code=303)
-        
-        # Verificar que el código FAC existe y está activo
-        fac_code = db.query(FacCode).filter(and_(FacCode.id == fac_code_id, FacCode.active == True)).first()
-        if not fac_code:
-            return RedirectResponse(url="/dashboard/fac_pins?error=fac_code_invalid", status_code=303)
-        
-        # Verificar que el código FAC no esté ya asignado
-        existing_fac = db.query(FacPinAssociation).filter(
-            and_(FacPinAssociation.fac_code_id == fac_code_id, FacPinAssociation.status == 'active')
-        ).first()
-        if existing_fac:
-            return RedirectResponse(url="/dashboard/fac_pins?error=fac_code_assigned", status_code=303)
-        
-        # Crear nueva asociación
-        new_association = FacPinAssociation(
-            extension=extension,
-            fac_code_id=fac_code_id,
-            user_name=user_name,
-            user_email=user_email,
-            department=department,
-            status=status,
-            notes=notes,
-            created_by=user.username if hasattr(user, 'username') else 'admin'
-        )
-        
-        db.add(new_association)
-        db.commit()
-        
-        logger.info(f"Nueva asociación FAC creada: {extension} - {fac_code.authorization_code} por {user.username if hasattr(user, 'username') else 'admin'}")
-        return RedirectResponse(url="/dashboard/fac_pins?success=created", status_code=303)
-        
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error creando asociación FAC: {e}")
-        return RedirectResponse(url="/dashboard/fac_pins?error=create_failed", status_code=303)
-    finally:
-        db.close()
-
-# ✅ API PARA ACTUALIZAR ASOCIACIÓN (CORREGIDA)
-@app.post("/api/fac-pins/update")
-async def update_fac_pin_association(
-    request: Request,
-    user=Depends(admin_only),
-    id: int = Form(...),
-    extension: str = Form(...),
-    fac_code_id: int = Form(...),  # ← CAMBIO: ID del código FAC
-    user_name: Optional[str] = Form(None),
-    department: Optional[str] = Form(None),
-    status: str = Form("active")
-):
-    if isinstance(user, RedirectResponse):
-        return user
-    
-    db = SessionLocal()
-    try:
-        # Buscar asociación existente
-        association = dashboard_fac.query(FacPinAssociation).filter(FacPinAssociation.id == id).first()
-        if not association:
-            return RedirectResponse(url="/dashboard/fac_pins?error=not_found", status_code=303)
-        
-        # Verificar unicidad de extensión (si cambió)
-        if association.extension != extension:
-            existing = db.query(FacPinAssociation).filter(
-                and_(FacPinAssociation.extension == extension, FacPinAssociation.id != id)
-            ).first()
-            if existing:
-                return RedirectResponse(url="/dashboard/fac_pins?error=extension_exists", status_code=303)
-        
-        # Verificar que el código FAC existe y está activo
-        fac_code = db.query(FacCode).filter(and_(FacCode.id == fac_code_id, FacCode.active == True)).first()
-        if not fac_code:
-            return RedirectResponse(url="/dashboard/fac_pins?error=fac_code_invalid", status_code=303)
-        
-        # Verificar unicidad de código FAC (si cambió)
-        if association.fac_code_id != fac_code_id:
-            existing_fac = db.query(FacPinAssociation).filter(
-                and_(
-                    FacPinAssociation.fac_code_id == fac_code_id,
-                    FacPinAssociation.status == 'active',
-                    FacPinAssociation.id != id
-                )
-            ).first()
-            if existing_fac:
-                return RedirectResponse(url="/dashboard/fac_pins?error=fac_code_assigned", status_code=303)
-        
-        # Actualizar campos
-        association.extension = extension
-        association.fac_code_id = fac_code_id
-        association.user_name = user_name
-        association.department = department
-        association.status = status
-        association.updated_at = datetime.utcnow()
-        
-        db.commit()
-        
-        logger.info(f"Asociación FAC actualizada: {extension} por {user.username if hasattr(user, 'username') else 'admin'}")
-        return RedirectResponse(url="/dashboard/fac_pins?success=updated", status_code=303)
-        
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error actualizando asociación FAC: {e}")
-        return RedirectResponse(url="/dashboard/fac_pins?error=update_failed", status_code=303)
-    finally:
-        # ✅ IMPORTANTE: Cerrar la sesión SIEMPRE
-        db.close()
-
-# ✅ FUNCIÓN PARA VALIDAR PIN FAC (CORREGIDA)
-def validate_fac_pin(extension: str, authorization_code: str) -> bool:
-    """
-    Valida si un código de autorización es válido para una extensión específica
-    """
-    try:
-        db = SessionLocal()
-        # Buscar asociación activa con código FAC activo
-        association = db.query(FacPinAssociation).join(
-            FacCode, FacPinAssociation.fac_code_id == FacCode.id
-        ).filter(
-            and_(
-                FacPinAssociation.extension == extension,
-                FacCode.authorization_code == authorization_code,
-                FacPinAssociation.status == 'active',
-                FacCode.active == True
-            )
-        ).first()
-        
-        return association is not None
-        
-    except Exception as e:
-        logger.error(f"Error validando código FAC: {e}")
-        return False
-
-# ✅ ENDPOINT PARA VALIDACIÓN EN TIEMPO REAL (CORREGIDO)
-@app.post("/api/fac-pins/validate")
-async def validate_fac_pin_endpoint(
-    extension: str = Form(...),
-    authorization_code: str = Form(...)  # ← CAMBIO: código de autorización
-):
-    """Endpoint para validar código FAC desde el sistema telefónico"""
-    is_valid = validate_fac_pin(extension, authorization_code)
-    
-    if is_valid:
-        logger.info(f"Código FAC válido usado: Extensión {extension}, Código {authorization_code}")
-        
-    return {
-        "valid": is_valid,
-        "extension": extension,
-        "authorization_code": authorization_code,
-        "message": "Código válido" if is_valid else "Código inválido o inactivo"
-    }

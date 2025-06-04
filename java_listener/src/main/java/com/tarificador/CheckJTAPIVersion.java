@@ -123,7 +123,6 @@ public class CheckJTAPIVersion {
             "javax.telephony.callcontrol.events.CallCtlConnNetworkAlertingEv",
             "javax.telephony.callcontrol.events.CallCtlConnNetworkReachedEv",
             "javax.telephony.callcontrol.events.CallCtlTermConnTalkingEv",
-            "javax.telephony.callcontrol.events.CallCtlConnDisconnectedEv",            
             "com.cisco.jtapi.extensions.CiscoTermConnTalkingEv",
             "com.cisco.jtapi.extensions.CiscoCallStartedEv",
             "com.cisco.jtapi.extensions.CiscoCallChangedEv"

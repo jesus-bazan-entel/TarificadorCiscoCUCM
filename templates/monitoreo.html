@@ -22,7 +22,7 @@
                                 <th>Hora Inicio</th>
                                 <th>Duración</th>
                                 <th>Costo Estimado</th>
-                                <th>Acciones</th>
+                                <!-- <th>Acciones</th> -->
                             </tr>
                         </thead>
                         <tbody id="active-calls">
@@ -219,11 +219,13 @@
                     <td>${startTime}</td>
                     <td>${durationFormatted}</td>
                     <td>${costFormatted}</td>
+                    <!--
                     <td>
                         <button class="btn btn-sm btn-danger" onclick="terminateCall('${call.call_id}')">
                             Terminar
                         </button>
                     </td>
+                    -->
                 `;
                 
                 tableBody.appendChild(row);
