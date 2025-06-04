@@ -1,0 +1,22 @@
+# Entorno Virtual de Python
+venv/
+__pycache__/
+*.pyc
+
+# Artefactos de Java / Maven
+java_listener/target/
+java_listener/src/main/java/com/tarificador/*.class
+java_listener/CiscoJtapi.index
+java_listener/maven-status/
+
+# Archivos .jar generados (si son artefactos de build y no librerías que distribuyes)
+# Si los .jar en target son el resultado de tu compilación, ya están cubiertos por target/
+# Si tienes .jar en otros lugares que son resultado de build, añádelos.
+# Por ejemplo:
+# *.jar
+
+# Archivos de log o temporales específicos
+# (Añade aquí si tienes otros)
+
+# Archivos de backup comunes
+*copy.html
