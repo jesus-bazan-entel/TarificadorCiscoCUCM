@@ -1,0 +1,32 @@
+Niveles de Permiso:
+0 - RESTRINGIDO:
+Nivel más restrictivo
+Sin permisos para realizar ningún tipo de llamada
+Posiblemente solo puede recibir llamadas o ninguna
+
+1 - LOC:
+Permiso para llamadas Locales solamente
+Llamadas dentro de la misma área/ciudad
+No incluye llamadas a celulares, larga distancia nacional ni internacional
+
+2 - LOCDDN:
+Llamadas Locales + DDN (Discado Directo Nacional)
+Permite llamadas dentro de la ciudad y a otras ciudades del país
+No incluye llamadas a celulares ni internacionales
+
+3 - LOCDONCEL:
+Llamadas Locales + Nacionales + Celulares
+Permite llamadas dentro de la ciudad, a otras ciudades y a números celulares
+No incluye llamadas internacionales
+
+4 - LOCDONCELDDI:
+Máximo nivel de permisos
+Llamadas Locales + Nacionales + Celulares + Internacionales (DDI = Discado Directo Internacional)
+Permite todo tipo de llamadas telefónicas
+
+Acrónimos:
+LOC: Llamadas Locales
+DDN: Discado Directo Nacional (llamadas a larga distancia nacional)
+DON: Probablemente Discado Directo Nacional (similar a DDN)
+CEL: Llamadas a números celulares
+DDI: Discado Directo In
